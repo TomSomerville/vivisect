@@ -33,10 +33,19 @@ _reqbinfields = [
     r'op',
 ]
 
+_binvalues = [
+    r'[01]+',
+]
+
+# Some RVC instructions use decimal constants instead of binary
+_decvalues = [
+    r'[0-9]+',
+]
+
 _binfields = _regfields + _immfields
 
 # The RVC instructions have more specific imm information than the form
-_immvalues = _immfields + _binfields + [
+_immvalues = _immfields + [
     r'shamt\[[^]]+\]',
     r'shamt',
     # Special IMM names used by the FENCE instruction
@@ -62,17 +71,8 @@ _regvalues = _regfields + [
     r'rs[0-9]?/rd\$\\n?eq\$\$\\{[0-9,]+\\}\$',
 ]
 
-_binvalues = [
-    r'[01]+',
-]
-
-# Some RVC instructions use decimal constants instead of binary
-_decvalues = [
-    r'[0-9]+',
-]
-
-# the required bin field may also have a value of 'rm'
-_reqbinvalues = _reqbinfields + _binvalues + [
+# the required bin field may also have a value of 'rm' (rounding mode)
+_reqbinvalues = _reqbinfields + _binvalues + _decvalues + [
     r'rm',
 ]
 
@@ -106,6 +106,7 @@ class OpcodeType(enum.Enum):
     REG = enum.auto()
     CONST = enum.auto()
     IMM = enum.auto()
+    RM = enum.auto()
     C_OPCODE = enum.auto()
     C_REG = enum.auto()
 
@@ -140,9 +141,19 @@ def get_instr_mask(fields):
     mask = '0b'
     value = '0b'
     for field in fields:
-        if isinstance(field.value, int):
+        if field.type in (OpcodeType.CONST, OpcodeType.OPCODE, OpcodeType.C_OPCODE):
             mask += '1' * field.bits
-            value += bin(field.value)[2:]
+            print(value, field.value, type(field.value))
+            if isinstance(field.value, int):
+                value += bin(field.value)[2:]
+            elif isinstance(field.value, str) and _binvaluepat.match(field.value):
+                value += field.value
+            elif isinstance(field.value, str) and _decvaluepat.match(field.value):
+                # Convert the decimal value string to an integer first
+                value += bin(int(field.value))[2:]
+            else:
+                raise Exception('Cannot create mask with non-integer field: %r' % field)
+
         else:
             mask += '0' * field.bits
             value += '0' * field.bits
@@ -179,18 +190,9 @@ def get_instr_flags(name, fields, priv=False):
         return 0
 
 
-def get_operand_type(operand):
-    # TODO: determine operand type based on value and type
-
-    # Just return the type enum name for now
-    return operand.type.name
-
-
 def get_field_type(field):
     if _immvaluepat.match(field):
         return OpcodeType.IMM
-    elif _decvaluepat.match(field):
-        return OpcodeType.CONST
     elif _regvaluepat.match(field):
         if 'prime' in field:
             return OpcodeType.C_REG
@@ -201,8 +203,12 @@ def get_field_type(field):
             return OpcodeType.OPCODE
         elif 'op' == field:
             return OpcodeType.C_OPCODE
+        elif 'rm' == field:
+            return OpcodeType.RM
         else:
             return OpcodeType.CONST
+    #elif _decvaluepat.match(field):
+    #    return OpcodeType.CONST
     else:
         raise Exception('Unknown field type: %r' % field)
 
@@ -336,7 +342,7 @@ def find_form(fields, forms):
                     col_width = sum([v[0] for v in value])
 
                     # Lists only match bin fields
-                    if _binvaluepat.match(value[0][1]) and _binfieldpat.match(field.value) and \
+                    if _binvaluepat.match(value[0][1]) and _reqbinfieldpat.match(field.value) and \
                             col_width == field.columns:
                         #print('%s matched %s' % (value, field))
                         parsed.extend([(value[0][0], int(value[0][1], 2))] + value[1:])
@@ -398,6 +404,7 @@ def find_form(fields, forms):
 
 def add_instr(instrs, name, cat, form, fields, notes, priv=False):
     # the opcode is the last field, ensure it is a constant
+    print(name, fields)
     assert fields[-1].type == OpcodeType.CONST
 
     # Get the combined mask and post-mask value for this instruction
@@ -535,6 +542,7 @@ def scrape_instrs(git_repo):
     jmps = ('JAL', 'JALR')
     uncond_jmps = [j.replace('AL', '') for j in jmps]
 
+    print('Creating special case instructions not in the RISCV tables: %s' % uncond_jmps)
     for cat in unpriv_instrs.keys():
         # turn JAL into J and JALR into JR
         for old, new in zip(jmps, uncond_jmps):
@@ -588,6 +596,25 @@ def scrape_instrs(git_repo):
     return forms, instrs
 
 
+def format_field_name(field):
+    # Make the field names look a little nicer
+    if '\\vert' in field.value:
+        # Squash any latex $\vert$ sequences into a ',' character
+        return field.value.replace('$\\vert$', ',')
+    elif '\\neq' in field.value:
+        return field.value.replace('$\\neq$', '!=').replace('$\{', '{').replace('\}$', '}')
+    elif field.value == '\\rdprime':
+        return "rd'"
+    elif field.value == '\\rsoneprime':
+        return "rs1'"
+    elif field.value == '\\rstwoprime':
+        return "rs2'"
+    elif field.value == '\\rsoneprime/\\rdprime':
+        return "rs1'/rd'"
+    else:
+        return field.value
+
+
 def export_instrs(forms, instrs, git_info):
     # Export all the forms
     form_list = list(forms.keys())
@@ -638,7 +665,13 @@ def export_instrs(forms, instrs, git_info):
             out.write('    %s = enum.auto()\n' % cat.upper())
         out.write('\n\n')
 
-        out.write('def RISCV_OP(enum.IntEnum):\n')
+        # Write out the field types
+        out.write('def RISCV_FIELD(enum.IntEnum):\n')
+        for field_type in ('REG', 'C_REG', 'IMM', 'RM'):
+            out.write('    %s = enum.auto()\n' % field_type)
+        out.write('\n\n')
+
+        out.write('def RISCV_INS(enum.IntEnum):\n')
         for instr in riscv_name_lookup.keys():
             out.write('    %s = enum.auto()\n' % instr.upper())
 
@@ -647,38 +680,54 @@ def export_instrs(forms, instrs, git_info):
         out.write('# Generated from:\n')
         for info in git_info:
             out.write('#   %s\n' % info)
-        out.write('\n')
 
         # Dump the types used to encode the instructions
-        out.write('''from collections import namedtuple
+        out.write('''
+from collections import namedtuple
+from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
 
-RiscVField = namedtuple('RiscVField', ['name', 'type', 'mask', 'shift', 'flags'])
+RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
 RiscVOp = namedtuple('RiscVOp', ['name', 'cat', 'form', 'mask', 'value', 'fields', 'flags'])
+
+__all__ = ['instructions']
 
 ''')
 
         # Dump the form and instructions
-        # TODO: Some things need to be done before this list of instructions is
-        #       good:
-        #       1. Generate a list of operand types based on the 'value' and
-        #          'type' for each register or immediate operand field
-        #          (get_operand_type)
+        # TODO:
+        #
+        # - figure out how to actually handle the weird imm[*****] fields
+        #
+        # - do we want unsigned flags for some IMM fields for unsigned
+        #   functions? (LWU vs LW) or should that be a different field type?
+        #   Or maybe based on the field name like imm vs uimm (or nzuimm)
+        #
+        # - Is the 'funct' field something that would be useful to turn into
+        #   flags or some other info?
         out.write('instructions = {\n')
         for name, (old_name, cats) in riscv_name_lookup.items():
             instr = instrs[cats[0]][old_name]
 
             # Only register and immediate fields should be printed
             operand_list = []
-            for op in instr.fields:
-                if op.type in (OpcodeType.IMM, OpcodeType.C_REG, OpcodeType.REG):
-                    op_type = get_operand_type(op)
+            # In general the operands should be displayed in reverse order than
+            # they are encoded in the instruction so reverse the operand fields
+            # now.
+            for op in reversed(instr.fields):
+                if op.type in (OpcodeType.IMM, OpcodeType.RM, OpcodeType.C_REG, OpcodeType.REG):
                     # TODO: for now the operand flags field is a placeholder
-                    operand_list.append("RiscVField('%s', 0x%x, %d, %s)" % \
-                            (op_type, op.mask, op.shift, 0))
+                    operand_list.append("RiscVField('%s', RISCV_FIELD.%s, %d, 0x%x, %s)" % \
+                            (format_field_name(op), op.type.name, op.shift, op.mask, 0))
             operand_str = ', '.join(operand_list)
 
-            instr_str = "RiscVOp('%s', %r, '%s', 0x%x, 0x%x, [%s], %s)" % \
-                    (instr.name, cats, instr.form, instr.mask, instr.value, operand_str, instr.flags)
+            # Turn the categories from strings into RISCV_CAT names
+            if len(cats) == 1:
+                cats_str = 'RISCV_CAT.' + cats[0] + ','
+            else:
+                cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
+
+            instr_str = "RiscVOp(RISCV_INS.%s, (%s), RISCV_FORM.%s, 0x%x, 0x%x, [%s], %s)" % \
+                    (instr.name, cats_str, instr.form, instr.mask, instr.value, operand_str, instr.flags)
             out.write("    '%s': %s,\n" % (name, instr_str))
         out.write('}\n')
 
