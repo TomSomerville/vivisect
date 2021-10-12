@@ -130,7 +130,7 @@ RiscVOp = namedtuple('RiscVOp', [
     'form',
     'mask',
     'value',
-    'operands',
+    'fields',
     'flags',
     'notes',
 ])
@@ -150,19 +150,34 @@ def get_instr_mask(fields):
     return (int(mask, 2), int(value, 2))
 
 
-def get_instr_flags(name, fields):
-    # TODO: determine the instruction flags
-    # envi.IF_NOFALL
-    # envi.IF_PRIV
-    # envi.IF_CALL
-    # envi.IF_BRANCH
-    # envi.IF_RET
-    # envi.IF_COND
-    # envi.IF_REPEAT
-    # envi.IF_BRANCH_COND
+def get_instr_flags(name, fields, priv=False):
+    # Return the correct set of flags for the instruction
+    #   envi.IF_NOFALL
+    #   envi.IF_PRIV
+    #   envi.IF_CALL
+    #   envi.IF_BRANCH
+    #   envi.IF_RET
+    #   envi.IF_COND
+    #   envi.IF_REPEAT
+    #   envi.IF_BRANCH_COND
 
-    # For now just return an empty flags
-    return 0
+    flags = ''
+    if name in ('J', 'JR', 'C.JR', 'C.J'):
+        flags = 'envi.IF_CALL | envi.IF_NOFALL'
+    elif name in ('JAL', 'JALR', 'C.JAL', 'C.JALR'):
+        flags = 'envi.IF_CALL'
+    elif name in ('BEQ', 'BNE', 'BLT', 'BGE', 'BLTU', 'BGEU', 'C.BNEZ', 'C.BEQZ'):
+        flags = 'envi.IF_COND | envi.IF_BRANCH'
+
+    if flags and priv:
+        return flags + ' | envi.IF_PRIV'
+    elif flags:
+        return flags
+    elif priv:
+        return 'envi.IF_PRIV'
+    else:
+        return 0
+
 
 def get_operand_type(operand):
     # TODO: determine operand type based on value and type
@@ -381,7 +396,22 @@ def find_form(fields, forms):
         raise Exception('no form match found for %r' % fields)
 
 
-def scrape_instr_table(text, default_cat=None, forms=None):
+def add_instr(instrs, name, cat, form, fields, notes, priv=False):
+    # the opcode is the last field, ensure it is a constant
+    assert fields[-1].type == OpcodeType.CONST
+
+    # Get the combined mask and post-mask value for this instruction
+    op_mask, op_value = get_instr_mask(fields)
+
+    # And generate the flags for this instruction
+    op_flags = get_instr_flags(name, fields, priv)
+
+    op = RiscVOp(name, cat, form, op_mask, op_value, fields, op_flags, notes)
+    instrs[cat][name] = op
+    print('Adding op [%s] %s (%s): %s' % (cat, name, form, fields))
+
+
+def scrape_instr_table(text, default_cat=None, forms=None, priv=False):
     # Find the instruction definitions
     parts = [
         r'\n +&\n((?:\\.*instbit.* [&\\]+ *\n)+)\\[a-z]+line{\d-\d+}\n',
@@ -441,21 +471,7 @@ def scrape_instr_table(text, default_cat=None, forms=None):
 
                 # Now find the bit width of the fields
                 op_fields = get_field_info(descr, columns)
-
-                # the opcode is the last field, ensure it is a constant
-                assert op_fields[-1].type == OpcodeType.CONST
-
-                # Get the combined mask and post-mask value for this
-                # instruction
-                op_mask, op_value = get_instr_mask(op_fields)
-
-                # And generate the flags for this instruction
-                op_flags = get_instr_flags(instr_name, op_fields)
-
-                op = RiscVOp(instr_name, cur_cat, form_name, op_mask,
-                        op_value, op_fields, op_flags, notesmatch)
-                instructions[cur_cat][instr_name] = op
-                print('Adding op [%s] %s (%s): %s' % (cur_cat, instr_name, form_name, op_fields))
+                add_instr(instructions, instr_name, cur_cat, form_name, op_fields, notesmatch, priv=priv)
         else:
             extmatch = cat_extension_pat.search(catname)
             if extmatch:
@@ -512,6 +528,31 @@ def scrape_instrs(git_repo):
         instr_table = f.read()
     unpriv_forms, unpriv_instrs = scrape_instr_table(instr_table)
     forms.update(unpriv_forms)
+
+    # SPECIAL CASES:
+    #   Unconditional Jumps are JAL with rd set to 0, so find JAL and make a
+    #   duplicate entry for "J"
+    jmps = ('JAL', 'JALR')
+    uncond_jmps = [j.replace('AL', '') for j in jmps]
+
+    for cat in unpriv_instrs.keys():
+        # turn JAL into J and JALR into JR
+        for old, new in zip(jmps, uncond_jmps):
+            if old in unpriv_instrs[cat]:
+                old_instr = unpriv_instrs[cat][old]
+
+                new_fields = []
+                for field in old_instr.fields:
+                    if field.value == 'rd':
+                        new_field = RiscVField(0, OpcodeType.CONST, field.columns,
+                                field.bits, field.mask, field.shift)
+                        new_fields.append(new_field)
+                    else:
+                        # copy from JAL field
+                        new_fields.append(field)
+
+                add_instr(unpriv_instrs, new, cat, old_instr.form, new_fields, '', priv=False)
+
     for cat, data in unpriv_instrs.items():
         if cat not in instrs:
             instrs[cat] = data
@@ -521,7 +562,7 @@ def scrape_instrs(git_repo):
     with open(git_repo + '/src/priv-instr-table.tex', 'r') as f:
         instr_table = f.read()
     # the privileged instructions should default to the base RV32I category
-    priv_forms, priv_instrs = scrape_instr_table(instr_table, 'RV32I')
+    priv_forms, priv_instrs = scrape_instr_table(instr_table, 'RV32I', priv=True)
     forms.update(priv_forms)
     for cat, data in priv_instrs.items():
         if cat not in instrs:
@@ -581,6 +622,11 @@ def export_instrs(forms, instrs, git_info):
         # These constants will be IntEnums
         out.write('import enum\n\n\n')
 
+        # Write the custom IF_??? and OF_??? flags used by RISC-V instructions
+        # (if any)
+        #out.write('IF_NONE = 0\n\n')
+        #out.write('OF_NONE = 0\n\n\n')
+
         # Now save the scraped FORM, CAT, and OP (instruction) values
         out.write('def RISCV_FORM(enum.IntEnum):\n')
         for form in form_list:
@@ -606,8 +652,8 @@ def export_instrs(forms, instrs, git_info):
         # Dump the types used to encode the instructions
         out.write('''from collections import namedtuple
 
-RiscVField = namedtuple('RiscVField', ['type', 'mask', 'shift', 'flags'])
-RiscVOp = namedtuple('RiscVOp', ['name', 'cat', 'form', 'mask', 'value', 'operands', 'flags'])
+RiscVField = namedtuple('RiscVField', ['name', 'type', 'mask', 'shift', 'flags'])
+RiscVOp = namedtuple('RiscVOp', ['name', 'cat', 'form', 'mask', 'value', 'fields', 'flags'])
 
 ''')
 
@@ -617,15 +663,13 @@ RiscVOp = namedtuple('RiscVOp', ['name', 'cat', 'form', 'mask', 'value', 'operan
         #       1. Generate a list of operand types based on the 'value' and
         #          'type' for each register or immediate operand field
         #          (get_operand_type)
-        #       2. Generate the correct flags for each instruction
-        #          (get_instr_flags)
         out.write('instructions = {\n')
         for name, (old_name, cats) in riscv_name_lookup.items():
             instr = instrs[cats[0]][old_name]
 
             # Only register and immediate fields should be printed
             operand_list = []
-            for op in instr.operands:
+            for op in instr.fields:
                 if op.type in (OpcodeType.IMM, OpcodeType.C_REG, OpcodeType.REG):
                     op_type = get_operand_type(op)
                     # TODO: for now the operand flags field is a placeholder
