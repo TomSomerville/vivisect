@@ -687,7 +687,7 @@ from collections import namedtuple
 from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
 
 RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
-RiscVOp = namedtuple('RiscVOp', ['name', 'cat', 'form', 'mask', 'value', 'fields', 'flags'])
+RiscVOp = namedtuple('RiscVOp', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
 
 __all__ = ['instructions']
 
@@ -704,7 +704,7 @@ __all__ = ['instructions']
         #
         # - Is the 'funct' field something that would be useful to turn into
         #   flags or some other info?
-        out.write('instructions = {\n')
+        out.write('instructions = (\n')
         for name, (old_name, cats) in riscv_name_lookup.items():
             instr = instrs[cats[0]][old_name]
 
@@ -726,10 +726,10 @@ __all__ = ['instructions']
             else:
                 cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
 
-            instr_str = "RiscVOp(RISCV_INS.%s, (%s), RISCV_FORM.%s, 0x%x, 0x%x, [%s], %s)" % \
-                    (instr.name, cats_str, instr.form, instr.mask, instr.value, operand_str, instr.flags)
-            out.write("    '%s': %s,\n" % (name, instr_str))
-        out.write('}\n')
+            instr_str = "RiscVOp('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, [%s], %s)" % \
+                    (old_name, name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
+            out.write("    %s,\n" % instr_str)
+        out.write(')\n')
 
 
 def main(git_repo):
