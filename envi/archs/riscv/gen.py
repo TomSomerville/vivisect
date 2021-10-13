@@ -604,13 +604,13 @@ def format_field_name(field):
     elif '\\neq' in field.value:
         return field.value.replace('$\\neq$', '!=').replace('$\{', '{').replace('\}$', '}')
     elif field.value == '\\rdprime':
-        return "rd'"
+        return "rd`"
     elif field.value == '\\rsoneprime':
-        return "rs1'"
+        return "rs1`"
     elif field.value == '\\rstwoprime':
-        return "rs2'"
+        return "rs2`"
     elif field.value == '\\rsoneprime/\\rdprime':
-        return "rs1'/rd'"
+        return "rs1`/rd`"
     else:
         return field.value
 
@@ -655,23 +655,25 @@ def export_instrs(forms, instrs, git_info):
         #out.write('OF_NONE = 0\n\n\n')
 
         # Now save the scraped FORM, CAT, and OP (instruction) values
-        out.write('def RISCV_FORM(enum.IntEnum):\n')
+        out.write('class RISCV_FORM(enum.IntEnum):\n')
         for form in form_list:
             out.write('    %s = enum.auto()\n' % form.upper())
         out.write('\n\n')
 
-        out.write('def RISCV_CAT(enum.IntEnum):\n')
-        for cat in cat_list:
-            out.write('    %s = enum.auto()\n' % cat.upper())
-        out.write('\n\n')
+        # TODO: The category name strings don't yet match between the
+        # instruction encodings and the table entries
+        #out.write('class RISCV_CAT(enum.IntEnum):\n')
+        #for cat in cat_list:
+        #    out.write('    %s = enum.auto()\n' % cat.upper())
+        #out.write('\n\n')
 
         # Write out the field types
-        out.write('def RISCV_FIELD(enum.IntEnum):\n')
+        out.write('class RISCV_FIELD(enum.IntEnum):\n')
         for field_type in ('REG', 'C_REG', 'IMM', 'RM'):
             out.write('    %s = enum.auto()\n' % field_type)
         out.write('\n\n')
 
-        out.write('def RISCV_INS(enum.IntEnum):\n')
+        out.write('class RISCV_INS(enum.IntEnum):\n')
         for instr in riscv_name_lookup.keys():
             out.write('    %s = enum.auto()\n' % instr.upper())
 
@@ -684,10 +686,13 @@ def export_instrs(forms, instrs, git_info):
         # Dump the types used to encode the instructions
         out.write('''
 from collections import namedtuple
-from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
+
+import envi
+#from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
+from envi.archs.riscv.const_gen import RISCV_FORM, RISCV_INS, RISCV_FIELD
 
 RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
-RiscVOp = namedtuple('RiscVOp', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
+RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
 
 __all__ = ['instructions']
 
@@ -718,15 +723,20 @@ __all__ = ['instructions']
                     # TODO: for now the operand flags field is a placeholder
                     operand_list.append("RiscVField('%s', RISCV_FIELD.%s, %d, 0x%x, %s)" % \
                             (format_field_name(op), op.type.name, op.shift, op.mask, 0))
-            operand_str = ', '.join(operand_list)
+            if len(operand_list) == 1:
+                operand_str = operand_list[0]
+            else:
+                operand_str = ', '.join(operand_list)
 
             # Turn the categories from strings into RISCV_CAT names
             if len(cats) == 1:
-                cats_str = 'RISCV_CAT.' + cats[0] + ','
+                #cats_str = 'RISCV_CAT.' + cat[0] + ','
+                cats_str = "'%s'," % cat[0]
             else:
-                cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
+                #cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
+                cats_str = ', '.join("'%s'" % c for c in cats)
 
-            instr_str = "RiscVOp('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, [%s], %s)" % \
+            instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, (%s), %s)" % \
                     (old_name, name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
             out.write("    %s,\n" % instr_str)
         out.write(')\n')
