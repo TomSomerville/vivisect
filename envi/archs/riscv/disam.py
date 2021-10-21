@@ -6,7 +6,7 @@ class RiscVOpcode():
     def __init__(self):
         pass
 
-class RiscVROperand():
+class RiscVRegOperand():
     def __init__(self):
         pass
 
@@ -19,7 +19,7 @@ class RiscVROperand():
     def getOperAddr(self):
         pass
 
-class RiscVIOperand():
+class RiscVImmOperand():
     def __init__(self):
         pass
 
@@ -32,7 +32,7 @@ class RiscVIOperand():
     def getOperAddr(self):
         pass
 
-class RiscVSOperand():
+class RiscVCRegOperand():
     def __init__(self):
         pass
 
@@ -45,46 +45,7 @@ class RiscVSOperand():
     def getOperAddr(self):
         pass
 
-class RiscVBOperand():
-    def __init__(self):
-        pass
-
-    def setOperValue(self):
-        pass
-
-    def getOperValue(self):
-        pass
-
-    def getOperAddr(self):
-        pass
-
-class RiscVUOperand():
-    def __init__(self):
-        pass
-
-    def setOperValue(self):
-        pass
-
-    def getOperValue(self):
-        pass
-
-    def getOperAddr(self):
-        pass
-
-class RiscVJOperand():
-    def __init__(self):
-        pass
-
-    def setOperValue(self):
-        pass
-
-    def getOperValue(self):
-        pass
-
-    def getOperAddr(self):
-        pass
-
-class RiscVR4Operand():
+class RiscVRMOperand():
     def __init__(self):
         pass
 

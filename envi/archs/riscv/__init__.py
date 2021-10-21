@@ -9,7 +9,7 @@ from envi.archs.riscv.disasm import *
 from envi.archs.riscv.const import *
 
 class RiscvModule(envi.ArchitectureModule):
-	def __init__(self):
+    def __init__(self):
         envi.ArchitectureModule.__init__(self, "RiscV")
         self._arch_dis = RiscVDisasm()
 
@@ -30,15 +30,15 @@ class RiscvModule(envi.ArchitectureModule):
 
 #no idea on this one, other 32 bit like i386 use "0x%.8x" % va. I cannot seem to locate what calls this. grepping only seems to have this in the various __init__ files
 
-	def pointerString(self, va):
-	    return '0x%.8x' % va
+    def pointerString(self, va):
+        return '0x%.8x' % va
 
 #no idea on this one
-	def archParseOpcode(self, bytez, offset=0, va=0):
-	    return self._arch_dis.disasm(bytez, offset, va)
+    def archParseOpcode(self, bytez, offset=0, va=0):
+        return self._arch_dis.disasm(bytez, offset, va)
 
-	def getEmulator(self):
-	    return RiscVEmulator()
+    def getEmulator(self):
+        return RiscVEmulator()
 
 
 # NOTE: This one must be after the definition of RiscvModule
