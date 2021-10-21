@@ -42,4 +42,4 @@ class RiscvModule(envi.ArchitectureModule):
 
 
 # NOTE: This one must be after the definition of RiscvModule
-from envi.archs.riscv.emu import *                    
+#from envi.archs.riscv.emu import *                    

@@ -1,7 +1,3 @@
-class RiscVRegisterContext():
-    def __init__(self):
-        pass
-
 class RiscVOpcode():
     def __init__(self):
         pass
