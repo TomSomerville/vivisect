@@ -111,12 +111,12 @@ class OpcodeType(enum.Enum):
     C_REG = enum.auto()
 
 
-RiscVForm = namedtuple('RiscVForm', [
+Form = namedtuple('Form', [
     'name',
     'fields',
 ])
 
-RiscVField = namedtuple('RiscVField', [
+Field = namedtuple('Field', [
     'value',  # "name" or integer constant
     'type',
     'columns',
@@ -125,7 +125,7 @@ RiscVField = namedtuple('RiscVField', [
     'shift',
 ])
 
-RiscVOp = namedtuple('RiscVOp', [
+Op = namedtuple('Op', [
     'name',
     'cat',
     'form',
@@ -143,7 +143,6 @@ def get_instr_mask(fields):
     for field in fields:
         if field.type in (OpcodeType.CONST, OpcodeType.OPCODE, OpcodeType.C_OPCODE):
             mask += '1' * field.bits
-            print(value, field.value, type(field.value))
             if isinstance(field.value, int):
                 value += bin(field.value)[2:]
             elif isinstance(field.value, str) and _binvaluepat.match(field.value):
@@ -222,20 +221,27 @@ def get_field_info(instr_fields, columns):
             start = columns[col][0]
         else:
             start = columns[col]
+
         col += int(size)
-        try:
+
+        # Now get the start of the next field
+        if col < len(columns):
             if isinstance(columns[col], tuple):
                 end = columns[col][0]
             else:
                 end = columns[col]
-        except IndexError:
-            if isinstance(columns[-1], tuple):
-                end = columns[-1][1]
-            else:
-                end = 0
+        else:
+            # If the previous column was the last field then end is -1 to keep
+            # up the pattern of the end being exclusive (the start of the next
+            # column)
+            end = -1
 
+        # Start is inclusive but end is not
         field_bits = start - end
-        field_shift = end
+
+        # Because end is the start of the next column beyond the current field
+        # add 1 to end to get the correct shift value for this field
+        field_shift = end + 1
 
         # Determine the type of this field by pattern
         field_type = get_field_type(value)
@@ -244,7 +250,7 @@ def get_field_info(instr_fields, columns):
         # from an instruction
         #field_mask = int('0b' + '1' * field_bits, 2)
         field_mask = (2 ** field_bits) - 1
-        fields.append(RiscVField(value, field_type, int(size), field_bits, field_mask, field_shift))
+        fields.append(Field(value, field_type, int(size), field_bits, field_mask, field_shift))
 
     return fields
 
@@ -404,7 +410,6 @@ def find_form(fields, forms):
 
 def add_instr(instrs, name, cat, form, fields, notes, priv=False):
     # the opcode is the last field, ensure it is a constant
-    print(name, fields)
     assert fields[-1].type == OpcodeType.CONST
 
     # Get the combined mask and post-mask value for this instruction
@@ -413,9 +418,12 @@ def add_instr(instrs, name, cat, form, fields, notes, priv=False):
     # And generate the flags for this instruction
     op_flags = get_instr_flags(name, fields, priv)
 
-    op = RiscVOp(name, cat, form, op_mask, op_value, fields, op_flags, notes)
+    op = Op(name, cat, form, op_mask, op_value, fields, op_flags, notes)
     instrs[cat][name] = op
-    print('Adding op [%s] %s (%s): %s' % (cat, name, form, fields))
+    print('Adding op [%s] %s (%s-type):' % (op.cat, op.name, op.form))
+    for field in op.fields:
+        ftype = '(%s)' % field.type.name
+        print('  %-7s %-20s: bits=%d, mask=0x%02x, shift=%d' % (ftype, field.value, field.bits, field.mask, field.shift))
 
 
 def scrape_instr_table(text, default_cat=None, forms=None, priv=False):
@@ -467,7 +475,7 @@ def scrape_instr_table(text, default_cat=None, forms=None, priv=False):
                 form_name = instr_fields[-1].upper().replace('-', '_')
                 fields = get_field_info(instr_fields[:-1], columns)
                 print('Adding form %s (%s)' % (form_name, fields))
-                forms[form_name] = RiscVForm(form_name, fields)
+                forms[form_name] = Form(form_name, fields)
             else:
                 assert instr_name not in instructions[cur_cat]
 
@@ -522,7 +530,7 @@ def scrape_rvc_forms(text):
 
         fields = get_field_info(form_fields, rvc_columns)
         print('Adding form %s: %s' % (form_name, fields))
-        forms[form_name] = RiscVForm(form_name, fields)
+        forms[form_name] = Form(form_name, fields)
 
     return forms
 
@@ -552,7 +560,7 @@ def scrape_instrs(git_repo):
                 new_fields = []
                 for field in old_instr.fields:
                     if field.value == 'rd':
-                        new_field = RiscVField(0, OpcodeType.CONST, field.columns,
+                        new_field = Field(0, OpcodeType.CONST, field.columns,
                                 field.bits, field.mask, field.shift)
                         new_fields.append(new_field)
                     else:
@@ -604,13 +612,13 @@ def format_field_name(field):
     elif '\\neq' in field.value:
         return field.value.replace('$\\neq$', '!=').replace('$\{', '{').replace('\}$', '}')
     elif field.value == '\\rdprime':
-        return "rd'"
+        return "rd`"
     elif field.value == '\\rsoneprime':
-        return "rs1'"
+        return "rs1`"
     elif field.value == '\\rstwoprime':
-        return "rs2'"
+        return "rs2`"
     elif field.value == '\\rsoneprime/\\rdprime':
-        return "rs1'/rd'"
+        return "rs1`/rd`"
     else:
         return field.value
 
@@ -655,23 +663,25 @@ def export_instrs(forms, instrs, git_info):
         #out.write('OF_NONE = 0\n\n\n')
 
         # Now save the scraped FORM, CAT, and OP (instruction) values
-        out.write('def RISCV_FORM(enum.IntEnum):\n')
+        out.write('class RISCV_FORM(enum.IntEnum):\n')
         for form in form_list:
             out.write('    %s = enum.auto()\n' % form.upper())
         out.write('\n\n')
 
-        out.write('def RISCV_CAT(enum.IntEnum):\n')
-        for cat in cat_list:
-            out.write('    %s = enum.auto()\n' % cat.upper())
-        out.write('\n\n')
+        # TODO: The category name strings don't yet match between the
+        # instruction encodings and the table entries
+        #out.write('class RISCV_CAT(enum.IntEnum):\n')
+        #for cat in cat_list:
+        #    out.write('    %s = enum.auto()\n' % cat.upper())
+        #out.write('\n\n')
 
         # Write out the field types
-        out.write('def RISCV_FIELD(enum.IntEnum):\n')
+        out.write('class RISCV_FIELD(enum.IntEnum):\n')
         for field_type in ('REG', 'C_REG', 'IMM', 'RM'):
             out.write('    %s = enum.auto()\n' % field_type)
         out.write('\n\n')
 
-        out.write('def RISCV_INS(enum.IntEnum):\n')
+        out.write('class RISCV_INS(enum.IntEnum):\n')
         for instr in riscv_name_lookup.keys():
             out.write('    %s = enum.auto()\n' % instr.upper())
 
@@ -684,10 +694,13 @@ def export_instrs(forms, instrs, git_info):
         # Dump the types used to encode the instructions
         out.write('''
 from collections import namedtuple
-from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
+
+import envi
+#from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
+from envi.archs.riscv.const_gen import RISCV_FORM, RISCV_INS, RISCV_FIELD
 
 RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
-RiscVOp = namedtuple('RiscVOp', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
+RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
 
 __all__ = ['instructions']
 
@@ -718,15 +731,20 @@ __all__ = ['instructions']
                     # TODO: for now the operand flags field is a placeholder
                     operand_list.append("RiscVField('%s', RISCV_FIELD.%s, %d, 0x%x, %s)" % \
                             (format_field_name(op), op.type.name, op.shift, op.mask, 0))
-            operand_str = ', '.join(operand_list)
+            if len(operand_list) == 1:
+                operand_str = operand_list[0]
+            else:
+                operand_str = ', '.join(operand_list)
 
             # Turn the categories from strings into RISCV_CAT names
             if len(cats) == 1:
-                cats_str = 'RISCV_CAT.' + cats[0] + ','
+                #cats_str = 'RISCV_CAT.' + cat[0] + ','
+                cats_str = "'%s'," % cat[0]
             else:
-                cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
+                #cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
+                cats_str = ', '.join("'%s'" % c for c in cats)
 
-            instr_str = "RiscVOp('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, [%s], %s)" % \
+            instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, (%s), %s)" % \
                     (old_name, name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
             out.write("    %s,\n" % instr_str)
         out.write(')\n')
