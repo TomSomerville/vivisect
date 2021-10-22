@@ -57,49 +57,59 @@ class RiscVRegOper(envi.RegisterOper):
 
 #line 345 of envi/__init__.py - aaron please verify correct class here...
 class RiscVImmOper(envi.ImmedOper):
-    def __init__(self, imm, va=0, size):
-        self.imm = imm
+    def __init__(self, val, va=0):
+        self.val = val
         self.va = va
-        self.size = size
 
     def __eq__(self, oper):
         if not isinstance(oper, self.__class__):
             return False
-        if self.imm != oper.imm:
+        if self.val != oper.val:
             return False
         if self.oflags != oper.oflags:
             return False
         return True
 
     def getOperValue(self, op, emu=none):
-        return self.imm
+        return self.val
 
+    #Rework to calculate #of BYTES, not bits
     def getWidth(self, emu):
-        return self.size
+        return emu.getPointerSize()
 
     #returns content intended to be printed to screen
     def repr(self, op):
-        return '#0x%.3x' % (self.imm)
+        return hex(self.val)
 
-    #displays the values on the vivisect canvas gui
+    #displays the values on the canvas
     def render(self, mcanv, op, idx):
-        val = self.imm
-        mcanv.addText('#')
-        #size of value should be trimmed or set to max for arch? 22bits is longest immediate (UType)
-        mcanv.addNameText('0x%.3x' % (val))
+        value = self.val
+        hint = mcanv.syms.getSymHint(op.va, idx)
+        if hint != None:
+            if mcanv.mem.isValidPointer(value):
+                mcanv.addVaText(hint, value)
+            else:
+                mcanv.addNameText(hint)
+        elif mcanv.mem.isValidPointer(value):
+            name = addrToName(mcanv, value)
+            mcanv.addVaText(name, value)
+        else:
+
+            if abs(self.val) >= 4096:
+                mcanv.addNameText(hex(value))
+            else:
+                mcanv.addNameText(str(value))
 
     #no def involvesPC needed correct?
     def involvesPC(self):
         return False
 
-    #no setOperValue needed, as the value does not need to be stored anywhere and exists only in this instruction?
+    def getOperAddr(self):
+        return None
+
+    #shouldnt be needed for Immediates
     def setOperValue(self):
         pass
-
-    #no setOperValue needed, as the value does not need to be stored anywhere and exists only in this instruction?
-    def getOperAddr(self):
-        pass
-
 
 #essentially just a reg
 #make reg parent
