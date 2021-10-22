@@ -46,24 +46,57 @@ class RiscVRegOper(envi.RegisterOper):
     def getOperAddr(self, op, emu=None):
         return None
 
+    #returns content intended to be printed to screen
     def repr(self, op):
         return riscv_regs.registers[self.reg]
 
+    #displays the values on the vivisect canvas gui
     def render(self, mcanv, op, idx):
         rname = self.repr(op)
         mcanv.addNameText(rname, typename='registers')
 
+#line 345 of envi/__init__.py - aaron please verify correct class here...
+class RiscVImmOper(envi.ImmedOper):
+    def __init__(self, imm, va=0, size):
+        self.imm = imm
+        self.va = va
+        self.size = size
 
-class RiscVImmOper():
-    def __init__(self):
-        pass
+    def __eq__(self, oper):
+        if not isinstance(oper, self.__class__):
+            return False
+        if self.imm != oper.imm:
+            return False
+        if self.oflags != oper.oflags:
+            return False
+        return True
 
+    def getOperValue(self, op, emu=none):
+        return self.imm
+
+    def getWidth(self, emu):
+        return self.size
+
+    #returns content intended to be printed to screen
+    def repr(self, op):
+        return '#0x%.3x' % (self.imm)
+
+    #displays the values on the vivisect canvas gui
+    def render(self, mcanv, op, idx):
+        val = self.imm
+        mcanv.addText('#')
+        #size of value should be trimmed or set to max for arch? 22bits is longest immediate (UType)
+        mcanv.addNameText('0x%.3x' % (val))
+
+    #no def involvesPC needed correct?
+    def involvesPC(self):
+        return False
+
+    #no setOperValue needed, as the value does not need to be stored anywhere and exists only in this instruction?
     def setOperValue(self):
         pass
 
-    def getOperValue(self):
-        pass
-
+    #no setOperValue needed, as the value does not need to be stored anywhere and exists only in this instruction?
     def getOperAddr(self):
         pass
 
@@ -72,9 +105,13 @@ class RiscVImmOper():
 #make reg parent
 #self.reg + 8
 #see uper screenie
-class RiscVCRegOper():
-    def __init__(self):
-        pass
+class RiscVCRegOper(RiscVRegOper):
+    def __init__(self, c_reg, va=0, oflags=0):
+        reg = c_reg + 8
+        super().__init__(reg, va, oflags)
+        #I think the super call above will work, however adding aarons code commented out for the time being just in case. 
+        #I like the one aboce because its less mess and simpler to understand to me at least. Will remove comments after proven.
+        #super(RiscVCRegOper, self).__init__(reg, va, oflags)
 
     def setOperValue(self):
         pass
@@ -87,9 +124,9 @@ class RiscVCRegOper():
 
 
 #essentially just a number
-class RiscVRMOper():
-    def __init__(self):
-        pass
+class RiscVRMOper(RiscVImmOper):
+    def __init__(self, rm, va=0, oflags=0):
+        super().__init__(rm, va, oflags)
 
     def setOperValue(self):
         pass
