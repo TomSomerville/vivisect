@@ -111,39 +111,7 @@ class RiscVImmOper(envi.ImmedOper):
     def setOperValue(self):
         pass
 
-#essentially just a reg
-#make reg parent
-#self.reg + 8
-#see uper screenie
 class RiscVCRegOper(RiscVRegOper):
     def __init__(self, c_reg, va=0, oflags=0):
         reg = c_reg + 8
         super().__init__(reg, va, oflags)
-        #I think the super call above will work, however adding aarons code commented out for the time being just in case. 
-        #I like the one aboce because its less mess and simpler to understand to me at least. Will remove comments after proven.
-        #super(RiscVCRegOper, self).__init__(reg, va, oflags)
-
-    def setOperValue(self):
-        pass
-
-    def getOperValue(self):
-        pass
-
-    def getOperAddr(self):
-        pass
-
-
-#essentially just a number
-class RiscVRMOper(RiscVImmOper):
-    def __init__(self, rm, va=0, oflags=0):
-        super().__init__(rm, va, oflags)
-
-    def setOperValue(self):
-        pass
-
-    def getOperValue(self):
-        pass
-
-    def getOperAddr(self):
-        pass
-
