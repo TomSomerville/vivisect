@@ -2,9 +2,115 @@ import envi
 import envi.archs.riscv.regs as riscv_regs
 
 
-class RiscVOpcode():
-    def __init__(self):
-        pass
+class RiscVOpcode(envi.Opcode):
+    _def_arch = envi.ARCH_RSICV
+
+    def __init__(self, va, opcode, mnem, prefixes, size, opers, iflags=0, simdflags=0):
+        self.opcode = opcode
+        self.mnem = mnem
+        self.prefixes = prefixes
+        self.size = size
+        self.opers = opers
+        self.repr = None
+        self.iflags = iflags
+        self.simdflags = simdflags
+        self.va = va
+
+    def __hash_(self):
+        return int(hash(self.mnem) ^ (self.size << 4))
+
+    def __len__(self):
+        return int(self.size)
+
+    def getRefOpers(self):
+        for oidx, o in enumerate(self.opers):
+            if o.isReg() and o.reg == REG_PC:
+                continue
+            yield (oidx, o)
+
+
+    def getBranches(self, emu=None):
+        ret = []
+        
+        flags = 0
+        addb = False
+
+        #what is IF_COND and BR_COND and IF_NOFALL and IF_RET and IF_BRANCH and IF_CALL and 
+        if self.iflags & (IF_COND):
+            flags |= envi.BR_COND
+            addb = True
+
+
+        #what is fall through #see ppc line 38 comment.
+        if not self.iflags & (envi.IF_NOFALL | envi.IF_RET | envi.IF_BRANCH) or self.iflags & envi.IF_COND:
+            ret.append((self.va + self.size, flags|envi.BR_FALL))
+
+       if len(self.opers) == 0:
+           if self.iflags & envi.IF_CALL:
+               ret.append(None, flags | envi.BR_PROC))
+            return ret
+
+        if self.iflags & IF_CALL:
+            flags |= envi.BR_PROC
+            addb = True
+
+        elif (self.iflags & IF_CALLCC) == IF_CALLCC:
+            flags |= (envi.BR_PROC | envi.BR_COND)
+            addb = True
+
+        elif self.iflags & IF_BRANCH:
+            addb = True
+
+        if addb:
+            oper = self.opers[-1]
+            if oper.isDeref():
+                flags |= envi.BR_DEREF
+                tova = oper.getOperAddr(self, emu=emu)
+            else:
+                tova = oper.getOperValue(self, emu=emu)
+
+            ret.append((tova, flags))
+
+        return ret
+
+    def getOperValue(self):
+        oper = self.opers[idx]
+        return oper.getOperValue(self, emu=emu, codeflow=codeflow)
+
+    #Arm has this, and ppc doesnt? Doesnt appear to be used in this class, what is S FLAG MASK? Can we remove since we arent worried about flags yet?
+    S_FLAG_MASK = IF_PSR_S | IF_PSR_S_SIL
+
+
+    def render(self):
+                """
+        Render this opcode to the specified memory canvas
+        """
+        if self.prefixes:
+            pfx = self._getPrefixName(self.prefixes)
+            if pfx:
+                mcanv.addNameText("%s: " % pfx, pfx)
+
+        mnem = self.mnem
+        mcanv.addNameText(mnem, self.mnem, typename="mnemonic")
+        mcanv.addText(" ")
+
+        # Allow each of our operands to render
+        imax = len(self.opers)
+        lasti = imax - 1
+        for i in range(imax):
+            oper = self.opers[i]
+            oper.render(mcanv, self, i)
+            if i != lasti:
+                mcanv.addText(",")
+
+
+    def __repr__(self):
+        mnem = self.mnem + cond_codes.get(self.prefixes)
+        x = []
+        for o in self.opers:
+            x.append(o.repr(self))
+        return mnem + " " + ", ".join(x)
+
 
 class RiscVRegOper(envi.RegisterOper):
     #reg == 5 bit number from disasm.py
