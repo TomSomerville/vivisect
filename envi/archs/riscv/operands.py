@@ -3,22 +3,8 @@ import envi.archs.riscv.regs as riscv_regs
 
 
 class RiscVOpcode(envi.Opcode):
-    def __init__(self, va, opcode, mnem, prefixes, size, opers, iflags=0):
-        self.opcode = opcode
-        self.mnem = mnem
-        self.prefixes = prefixes
-        self.size = size
-        self.opers = opers
-        self.repr = None
-        self.iflags = iflags
-        self.va = va
-
-    def getRefOpers(self):
-        for oidx, o in enumerate(self.opers):
-            if o.isReg() and o.reg == REG_PC:
-                continue
-            yield (oidx, o)
-
+    def __init__(self, va, opcode, mnem, size, opers, iflags=0):
+        super()__init__(va, opcode, mnem, 0, size, operands, iflags)
 
     def getBranches(self, emu=None):
         ret = []
@@ -30,8 +16,6 @@ class RiscVOpcode(envi.Opcode):
             flags |= envi.BR_COND
             addb = True
 
-
-        #what are all these IF_NOFALL / IF_RET / IF_CALL variables. They appear to be various condition / state variables set to True or False, but they are not (or have not yet been) set by our code, so envi appears to be setting them during operation? Are these things universal to all archs? do we need them or do we have to have them implimented for riscv if we do not yet impliment flags / 64b?
         if not self.iflags & (envi.IF_NOFALL | envi.IF_RET | envi.IF_BRANCH) or self.iflags & envi.IF_COND:
             ret.append((self.va + self.size, flags|envi.BR_FALL))
 
@@ -63,18 +47,7 @@ class RiscVOpcode(envi.Opcode):
 
         return ret
 
-    def getOperValue(self):
-        oper = self.opers[idx]
-        return oper.getOperValue(self, emu=emu, codeflow=codeflow)
-
-    #Arm has this, and ppc doesnt? Doesnt appear to be used in this class, what is S FLAG MASK? Can we remove since we arent worried about flags yet?
-    S_FLAG_MASK = IF_PSR_S | IF_PSR_S_SIL
-
-
     def render(self):
-                """
-        Render this opcode to the specified memory canvas
-        """
         if self.prefixes:
             pfx = self._getPrefixName(self.prefixes)
             if pfx:
