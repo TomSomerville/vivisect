@@ -3,6 +3,7 @@ import envi.archs.riscv.regs as riscv_regs
 
 
 class RiscVOpcode(envi.Opcode):
+    #in arm but not ppc
     _def_arch = envi.ARCH_RSICV
 
     def __init__(self, va, opcode, mnem, prefixes, size, opers, iflags=0, simdflags=0):
@@ -35,13 +36,12 @@ class RiscVOpcode(envi.Opcode):
         flags = 0
         addb = False
 
-        #what is IF_COND and BR_COND and IF_NOFALL and IF_RET and IF_BRANCH and IF_CALL and 
         if self.iflags & (IF_COND):
             flags |= envi.BR_COND
             addb = True
 
 
-        #what is fall through #see ppc line 38 comment.
+        #what are all these IF_NOFALL / IF_RET / IF_CALL variables. They appear to be various condition / state variables set to True or False, but they are not (or have not yet been) set by our code, so envi appears to be setting them during operation? Are these things universal to all archs? do we need them or do we have to have them implimented for riscv if we do not yet impliment flags / 64b?
         if not self.iflags & (envi.IF_NOFALL | envi.IF_RET | envi.IF_BRANCH) or self.iflags & envi.IF_COND:
             ret.append((self.va + self.size, flags|envi.BR_FALL))
 
