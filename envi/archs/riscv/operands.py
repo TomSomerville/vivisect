@@ -1,6 +1,7 @@
 import envi
 import envi.archs.riscv.regs as riscv_regs
 
+IF_CALLCC = (envi.IF_CALL | envi.IF_COND)
 
 class RiscVOpcode(envi.Opcode):
     def __init__(self, va, opcode, mnem, size, opers, iflags=0):
@@ -12,7 +13,7 @@ class RiscVOpcode(envi.Opcode):
         flags = 0
         addb = False
 
-        if self.iflags & (IF_COND):
+        if self.iflags & (envi.IF_COND):
             flags |= envi.BR_COND
             addb = True
 
@@ -24,15 +25,15 @@ class RiscVOpcode(envi.Opcode):
                ret.append(None, flags | envi.BR_PROC))
             return ret
 
-        if self.iflags & IF_CALL:
+        if self.iflags & envi.IF_CALL:
             flags |= envi.BR_PROC
             addb = True
 
-        elif (self.iflags & IF_CALLCC) == IF_CALLCC:
+        elif (self.iflags & envi.IF_CALLCC) == envi.IF_CALLCC:
             flags |= (envi.BR_PROC | envi.BR_COND)
             addb = True
 
-        elif self.iflags & IF_BRANCH:
+        elif self.iflags & envi.IF_BRANCH:
             addb = True
 
         if addb:
