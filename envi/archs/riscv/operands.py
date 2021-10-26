@@ -3,10 +3,7 @@ import envi.archs.riscv.regs as riscv_regs
 
 
 class RiscVOpcode(envi.Opcode):
-    #in arm but not ppc
-    _def_arch = envi.ARCH_RSICV
-
-    def __init__(self, va, opcode, mnem, prefixes, size, opers, iflags=0, simdflags=0):
+    def __init__(self, va, opcode, mnem, prefixes, size, opers, iflags=0):
         self.opcode = opcode
         self.mnem = mnem
         self.prefixes = prefixes
@@ -14,14 +11,7 @@ class RiscVOpcode(envi.Opcode):
         self.opers = opers
         self.repr = None
         self.iflags = iflags
-        self.simdflags = simdflags
         self.va = va
-
-    def __hash_(self):
-        return int(hash(self.mnem) ^ (self.size << 4))
-
-    def __len__(self):
-        return int(self.size)
 
     def getRefOpers(self):
         for oidx, o in enumerate(self.opers):
@@ -102,15 +92,6 @@ class RiscVOpcode(envi.Opcode):
             oper.render(mcanv, self, i)
             if i != lasti:
                 mcanv.addText(",")
-
-
-    def __repr__(self):
-        mnem = self.mnem + cond_codes.get(self.prefixes)
-        x = []
-        for o in self.opers:
-            x.append(o.repr(self))
-        return mnem + " " + ", ".join(x)
-
 
 class RiscVRegOper(envi.RegisterOper):
     #reg == 5 bit number from disasm.py
