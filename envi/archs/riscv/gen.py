@@ -408,9 +408,16 @@ def find_form(fields, forms):
         raise Exception('no form match found for %r' % fields)
 
 
-def add_instr(instrs, name, cat, form, fields, notes, priv=False):
+def add_instr(instrs, name, cat_list, form, fields, notes, priv=False):
     # the opcode is the last field, ensure it is a constant
     assert fields[-1].type == OpcodeType.CONST
+
+    # If there is a note that is just 'HINT' that indicates this is a weird
+    # instruction like C.SLLI64 that is only a hint but not defined as a real
+    # instruction?  If so, just skip it.
+    if 'HINT' in notes:
+        print('Skipping HINT-ONLY instruction %s' % name)
+        return
 
     # Get the combined mask and post-mask value for this instruction
     op_mask, op_value = get_instr_mask(fields)
@@ -418,89 +425,156 @@ def add_instr(instrs, name, cat, form, fields, notes, priv=False):
     # And generate the flags for this instruction
     op_flags = get_instr_flags(name, fields, priv)
 
-    op = Op(name, cat, form, op_mask, op_value, fields, op_flags, notes)
-    instrs[cat][name] = op
-    print('Adding op [%s] %s (%s-type):' % (op.cat, op.name, op.form))
-    for field in op.fields:
-        ftype = '(%s)' % field.type.name
-        print('  %-7s %-20s: bits=%d, mask=0x%02x, shift=%d' % (ftype, field.value, field.bits, field.mask, field.shift))
+    if not cat_list:
+        raise Exception('ERROR: no categories defined for: %s, %s, %s, %s, priv=%s' % (name, form, fields, notes, priv))
+
+    for cat in cat_list:
+        if cat not in instrs:
+            instrs[cat] = {}
+        assert name not in instrs[cat]
+
+        op = Op(name, cat, form, op_mask, op_value, fields, op_flags, notes)
+        instrs[cat][name] = op
+        extra_info_str = '%s-type' % op.form
+        if notes:
+            extra_info_str += '; ' + '; '.join(n for n in notes)
+        print('Adding op [%s] %s (%s):' % (op.cat, op.name, extra_info_str))
+        for field in op.fields:
+            ftype = '(%s)' % field.type.name
+            print('  %-7s %-20s: bits=%d, mask=0x%02x, shift=%d' % (ftype, field.value, field.bits, field.mask, field.shift))
+
+# Find the instruction definitions
+_parts = [
+    r'\n +&\n((?:\\.*instbit.* [&\\]+ *\n)+)\\[a-z]+line{\d-\d+}\n',
+    r'\\multicolumn[^\\]+\\bf (.*RV.*)} & \\\\ *\n',
+    r'\n&\n((?:\\multicolumn.* & *\n)+\\multicolumn.* & [A-Z0-9a-z.-]+) (?:{\\em \\tiny (.*)})? *\\\\ *\n\\[a-z]+line{\d-\d+}\n',
+]
+_pat = _makepat(_parts, re.MULTILINE)
+
+_field_size_parts = [
+    r'\\instbit{(\d+)}',
+    'instbitrange{(\d+)}{(\d+)}',
+]
+_field_size_pat = _makepat(_field_size_parts, re.MULTILINE)
+
+_cat_extension_pat = re.compile(r'{(Z[^}]+)}')
+_cat_pat = re.compile(r'(RV[0-9]+[^ ]*)')
+
+_info_parts = [
+    r'\\multicolumn{(\d+)}{[|c]+}{(.*)} &',
+    r' ([A-Z0-9a-z.-]+)',
+]
+_info_pat = _makepat(_info_parts, re.MULTILINE)
+
+
+def cats_from_str(catname):
+    #print(catname)
+    if catname[:2] != 'RV':
+        return []
+
+    # Check how many RV?? archs are listed in the first word
+    arch, extra = catname.split(' ', maxsplit=1)
+    cat_list = []
+    for part in arch.split('/'):
+        if part[:2] != 'RV':
+            cat_list.append('RV' + part)
+        else:
+            cat_list.append(part)
+
+    # See if this is an extension
+    match = _cat_extension_pat.search(extra)
+    if match:
+        for i in range(len(cat_list)):
+            cat_list[i] += match.group(1)
+
+    return cat_list
 
 
 def scrape_instr_table(text, default_cat=None, forms=None, priv=False):
-    # Find the instruction definitions
-    parts = [
-        r'\n +&\n((?:\\.*instbit.* [&\\]+ *\n)+)\\[a-z]+line{\d-\d+}\n',
-        r'\\multicolumn[^\\]+\\bf (.*RV.*)} & \\\\ *\n',
-        r'\n&\n((?:\\multicolumn.* & *\n)+\\multicolumn.* & [A-Z0-9a-z.-]+) (?:{\\em \\tiny (.*)})? *\\\\ *\n\\[a-z]+line{\d-\d+}\n',
-    ]
-    pat = _makepat(parts, re.MULTILINE)
-
-    field_size_parts = [
-        r'\\instbit{(\d+)}',
-        'instbitrange{(\d+)}{(\d+)}',
-    ]
-    field_size_pat = _makepat(field_size_parts, re.MULTILINE)
-
-    cat_extension_pat = re.compile(r'{(Z[^}]+)}')
-    cat_pat = re.compile(r'(RV[0-9]+[^ ]*)')
-
-    info_parts = [
-        r'\\multicolumn{(\d+)}{[|c]+}{(.*)} &',
-        r' ([A-Z0-9a-z.-]+)',
-    ]
-    info_pat = _makepat(info_parts, re.MULTILINE)
-
     columns = []
     if forms is None:
         forms = {}
     instructions = {}
-    if default_cat is not None:
-        instructions[default_cat] = {}
+    #if default_cat is not None:
+    #    instructions[default_cat] = {}
+    #cur_cat = default_cat
+    cur_cats = []
 
-    cur_cat = default_cat
-
-    for match in pat.findall(text):
+    for match in _pat.findall(text):
         #print(match)
         fieldbits, catname, instrmatch, notesmatch = match
         if fieldbits:
             columns = [int(m[0]) if m[0] else (int(m[1]), int(m[2])) \
-                    for m in field_size_pat.findall(fieldbits)]
+                    for m in _field_size_pat.findall(fieldbits)]
         elif instrmatch:
-            instr_fields = [(int(m[0]), m[1]) if m[1] else m[2] for m in info_pat.findall(instrmatch)]
+            instr_fields = [(int(m[0]), m[1]) if m[1] else m[2] for m in _info_pat.findall(instrmatch)]
             #print(instr_fields)
             # If the last field of instrmatch ends in '-type' this is a form
             # name (the relevant forms are repeated each section
             instr_name = instr_fields[-1]
-            if cur_cat is None or instr_name.endswith('-type'):
+            if instr_name.endswith('-type'):
                 form_name = instr_fields[-1].upper().replace('-', '_')
                 fields = get_field_info(instr_fields[:-1], columns)
                 print('Adding form %s (%s)' % (form_name, fields))
                 forms[form_name] = Form(form_name, fields)
             else:
-                assert instr_name not in instructions[cur_cat]
+                cat_list = []
+
+                # Remove any surrounding ()
+                if len(notesmatch) >= 2 and notesmatch[0] == '(' and notesmatch[-1] == ')':
+                    notesmatch = notesmatch[1:-1]
+
+                # Split the notes on any semicolons
+                notes = []
+                for notepart in notesmatch.split(';'):
+                    note = notepart.strip()
+                    if note[:2] == 'RV' and note[:11] != 'RV32 Custom':
+                        # If there is a space in this then the stuff after the
+                        # space should be a separate note
+                        extra = None
+                        if ' ' in note:
+                            cat_note, extra = note.split(' ', maxsplit=1)
+                            note = cat_note
+
+                        # Turn this into one or more categories
+                        for catpart in note.split('/'):
+                            if catpart[:2] != 'RV':
+                                catpart = 'RV' + catpart
+
+                            if default_cat is not None:
+                                # Append the last character of the supplied
+                                # default category to the new category
+                                catpart += default_cat[-1]
+                            cat_list.append(catpart)
+
+                        # If there was an extra note add it to the notes list
+                        if extra is not None:
+                            notes.append(extra)
+                    elif note:
+                        notes.append(note)
+
+                # If the category list is still empty, use the default category
+                if not cat_list:
+                    if cur_cats:
+                        cat_list.extend(cur_cats)
+                    elif default_cat is not None:
+                        cat_list.append(default_cat)
 
                 descr = instr_fields[:-1]
                 # We don't need the parsed form info right now
-                print(instr_name, descr)
                 form_name, _ = find_form(descr, forms)
 
                 # Now find the bit width of the fields
                 op_fields = get_field_info(descr, columns)
-                add_instr(instructions, instr_name, cur_cat, form_name, op_fields, notesmatch, priv=priv)
+                add_instr(instructions, instr_name, cat_list, form_name, op_fields, tuple(notes), priv=priv)
         else:
-            extmatch = cat_extension_pat.search(catname)
-            if extmatch:
-                cur_cat = extmatch.group(1)
-            else:
-                catmatch = cat_pat.search(catname)
-                cur_cat = catmatch.group(1)
-                if cur_cat[-1].isdigit():
-                    # Add the default 'I' to the category
-                    cur_cat += 'I'
-
-            assert cur_cat not in instructions
-            instructions[cur_cat] = {}
-            #print(cur_cat)
+            # If there are any category names found, add them to the instruction
+            # table
+            cur_cats = cats_from_str(catname)
+            for cat in cur_cats:
+                assert cat not in instructions
+                instructions[cat] = {}
+            #print(cur_cats)
 
     return forms, instructions
 
@@ -567,7 +641,7 @@ def scrape_instrs(git_repo):
                         # copy from JAL field
                         new_fields.append(field)
 
-                add_instr(unpriv_instrs, new, cat, old_instr.form, new_fields, '', priv=False)
+                add_instr(unpriv_instrs, new, [cat], old_instr.form, new_fields, old_instr.notes, priv=False)
 
     for cat, data in unpriv_instrs.items():
         if cat not in instrs:
@@ -588,13 +662,15 @@ def scrape_instrs(git_repo):
 
     with open(git_repo + '/src/c.tex', 'r') as f:
         instr_table = f.read()
-    # the compact instructions should default to the base RV32C category
+
+    # the compact instruction tables specific architecture size with each
+    # instruction
     rvc_forms = scrape_rvc_forms(instr_table)
     forms.update(rvc_forms)
 
     with open(git_repo + '/src/rvc-instr-table.tex', 'r') as f:
         instr_table = f.read()
-    _, rvc_instrs = scrape_instr_table(instr_table, 'RV32C', rvc_forms)
+    _, rvc_instrs = scrape_instr_table(instr_table, default_cat='RV32C', forms=rvc_forms)
     for cat, data in rvc_instrs.items():
         if cat not in instrs:
             instrs[cat] = data
@@ -629,7 +705,7 @@ def export_instrs(forms, instrs, git_info):
 
     # Make a list of the categories (the categories are the primary keys of the
     # instructions)
-    cat_list = list(instrs.keys())
+    #cat_list = list(instrs.keys())
 
     # To turn the instruction names into python constants we first need to
     # remove any embedded '.'s.  Also while looping through the instruction
@@ -639,7 +715,7 @@ def export_instrs(forms, instrs, git_info):
     for cat, cat_data in instrs.items():
         for instr_name in cat_data.keys():
             new_name = instr_name.replace('.', '_')
-            if instr_name not in riscv_name_lookup:
+            if new_name not in riscv_name_lookup:
                 riscv_name_lookup[new_name] = [instr_name, [cat]]
             else:
                 riscv_name_lookup[new_name][1].append(cat)
@@ -696,9 +772,9 @@ def export_instrs(forms, instrs, git_info):
 from collections import namedtuple
 
 import envi
-#from envi.archs.riscv.const_gen import RISCV_CAT, RISCV_FORM, RISCV_INS, RISCV_FIELD
-from envi.archs.riscv.const_gen import RISCV_FORM, RISCV_INS, RISCV_FIELD
+from envi.archs.riscv.const import RISCV_FORM, RISCV_INS, RISCV_FIELD, RISCV_CAT
 
+RiscVInsCat = namedtuple('RiscVInsCat', ['xlen', 'cat'])
 RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
 RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
 
@@ -736,13 +812,20 @@ __all__ = ['instructions']
             else:
                 operand_str = ', '.join(operand_list)
 
-            # Turn the categories from strings into RISCV_CAT names
-            if len(cats) == 1:
+            # Turn the categories from strings into RiscVInsCat values
+            cat_list = []
+            cat_parts_pat = re.compile(r'^RV([0-9]+)([^ ]*)$')
+            for cat in cats:
+                match = cat_parts_pat.search(cat)
+                assert match
+                cat_list.append('RiscVInsCat(%s, RISCV_CAT.%s)' % (match.group(1), match.group(2)))
+
+            if len(cat_list) == 1:
                 #cats_str = 'RISCV_CAT.' + cat[0] + ','
-                cats_str = "'%s'," % cat[0]
+                cats_str = '%s,' % cat_list[0]
             else:
                 #cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
-                cats_str = ', '.join("'%s'" % c for c in cats)
+                cats_str = ', '.join(cat_list)
 
             instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, (%s), %s)" % \
                     (old_name, name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
