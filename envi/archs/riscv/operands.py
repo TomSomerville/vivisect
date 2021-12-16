@@ -5,7 +5,7 @@ IF_CALLCC = (envi.IF_CALL | envi.IF_COND)
 
 class RiscVOpcode(envi.Opcode):
     def __init__(self, va, opcode, mnem, size, opers, iflags=0):
-        super()__init__(va, opcode, mnem, 0, size, operands, iflags)
+        super().__init__(va, opcode, mnem, 0, size, opers, iflags)
 
     def getBranches(self, emu=None):
         ret = []
@@ -20,9 +20,9 @@ class RiscVOpcode(envi.Opcode):
         if not self.iflags & (envi.IF_NOFALL | envi.IF_RET | envi.IF_BRANCH) or self.iflags & envi.IF_COND:
             ret.append((self.va + self.size, flags|envi.BR_FALL))
 
-       if len(self.opers) == 0:
-           if self.iflags & envi.IF_CALL:
-               ret.append(None, flags | envi.BR_PROC))
+        if len(self.opers) == 0:
+            if self.iflags & envi.IF_CALL:
+                ret.append(None, flags | envi.BR_PROC)
             return ret
 
         if self.iflags & envi.IF_CALL:
@@ -131,7 +131,7 @@ class RiscVImmOper(envi.ImmedOper):
             return False
         return True
 
-    def getOperValue(self, op, emu=none):
+    def getOperValue(self, op, emu=None):
         return self.val
 
     #Rework to calculate #of BYTES, not bits

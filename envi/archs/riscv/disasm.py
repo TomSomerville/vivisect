@@ -7,61 +7,48 @@ import envi.bits as e_bits
 
 from envi.archs.riscv.const import *
 from envi.archs.riscv.regs import *
-from envi.archs.riscv.instr_table import instructions
+from envi.archs.riscv.instr_table import *
+from envi.archs.riscv.operands import *
 
-class ricsvDisasm:
-	def __init__(self, endian=ENDIAN=MSB, options=CAT_RISCV_DEFAULT, psize=4):
-		self.psize = psize
+class riscvDisasm:
+    def __init__(self, endian=envi.ENDIAN_LSB, psize=4):
+        self.psize = psize
+        self.setEndian(endian)
 
-		self._instr_dict = None
-		self._dis_regctx = Riscv32RegisterContext()
-		self.setCategories(options)
-
-	def setEndian(self, endian):
+    def setEndian(self, endian):
         self.endian = endian
         self.fmt = ('<I', '>I')[endian]
 
-	def disasm(self, bytes, offset, va):
-		# Stuff we'll be putting in the opcode object
-		optype = None # This gets set if we successfully decode below
-		mnem = None
-		operands = []
-		prefixes = 0
+    def disasm(self, bytez, offset, va):
+        # Stuff we'll be putting in the opcode object
+        optype = None # This gets set if we successfully decode below
+        mnem = None
+        operands = []
+        prefixes = 0
 
-		if offset & 0x3:
-			raise envi.InvalidAddress(offset)
+        if offset & 0x3:
+            raise envi.InvalidAddress(offset)
 
-		ival, = struct.unpack_from(self.fmt, bytez, offset)
-		print('hex ival = ', hex(ival))
+        ival, = struct.unpack_from(self.fmt, bytez, offset)
+        print('hex ival = ', hex(ival))
 
-		key = ival
-
-		cat = self.instructions.get(key)
-		if not cat:
-            raise envi.InvalidInstruction(bytez[offset:offset+4], 'No Instruction Group Found: %x' % key, va)
-
-        for mask in cat:
-            masked_ival = ival & mask
-            try:
-                data = cat[mask][masked_ival]
+        for i in instructions:
+            if i.mask & ival == i.value:
+                found = i
                 break
-            except KeyError:
-                pass
-        else:
-            raise envi.InvalidInstruction(bytez[offset:offset+4], 'No Instruction Matched in Group: %x' % key, va)
+    
+        opers = []
 
-        name, opcode, form, cat, operands, iflags = data
+        for field in found.fields:
+            val = (ival >> field.shift) & field.mask
+            oper = OPERCLASSES[field.type](val, va)
+            opers.append(oper)
 
-        decoder = decoders.get(form, form_DFLT)
+        return RiscVOpcode(va, found.opcode, found.name, 4, opers, found.flags)
 
-        nopcode, opers, iflags = decoder(self, va, ival, opcode, operands, iflags)
-        if nopcode != None:
-            opcode = nopcode
-
-        mnem, opcode, opers, iflags = self.simplifiedMnems(ival, mnem, opcode, opers, iflags)
-        iflags |= self.__ARCH__
-
-        return RiscVIns(va, opcode, name, size=4, operands=opers)
-
-		
-
+OPERCLASSES = {
+    RISCV_FIELD.REG: RiscVRegOper,
+    RISCV_FIELD.IMM: RiscVImmOper,
+    RISCV_FIELD.RM: RiscVImmOper,
+    RISCV_FIELD.C_REG: RiscVRegOper,
+    }
