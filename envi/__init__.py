@@ -1310,7 +1310,7 @@ def getArchModule(name=None):
 
     elif name in ('riscv',):
         import envi.archs.riscv as e_riscv
-        return e_riscv.RiscvModule()
+        return e_riscv.RiscVModule()
 
     else:
         raise ArchNotImplemented(name)
@@ -1338,7 +1338,7 @@ def getArchModules(default=ARCH_DEFAULT):
     archs.append(e_thumb16.ThumbModule())
     archs.append(e_msp430.Msp430Module())
     archs.append(e_h8.H8Module())
-    archs.append(e_riscv.RiscvModule())
+    archs.append(e_riscv.RiscVModule())
 
     # Set the default module ( or None )
     archs[ARCH_DEFAULT] = archs[default >> 16]

@@ -8,7 +8,7 @@ from envi.archs.riscv.regs import *
 from envi.archs.riscv.disasm import *
 from envi.archs.riscv.const import *
 
-class RiscvModule(envi.ArchitectureModule):
+class RiscVModule(envi.ArchitectureModule):
     def __init__(self):
         envi.ArchitectureModule.__init__(self, "RiscV")
         self._arch_dis = RiscVDisasm()
@@ -42,4 +42,4 @@ class RiscvModule(envi.ArchitectureModule):
 
 
 # NOTE: This one must be after the definition of RiscvModule
-#from envi.archs.riscv.emu import *                    
+from envi.archs.riscv.emu import *                    

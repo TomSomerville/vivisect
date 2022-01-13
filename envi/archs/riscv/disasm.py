@@ -14,6 +14,22 @@ class RiscVDisasm:
     def __init__(self, endian=envi.ENDIAN_LSB, psize=4):
         self.psize = psize
         self.setEndian(endian)
+        self.setCategories()
+
+    def setCategories(self):
+
+        self.instrs = {}
+        xlen = self.psize * 8
+        for entry in instructions:
+            if entry.mask not in self.instrs:
+                self.instrs[entry.mask] = {}
+            if any(cat.xlen == xlen for cat in entry.cat):
+                if entry.value in self.instrs[entry.mask]:
+                    print(self.instrs[entry.mask][entry.value])
+                    print(entry)
+                    assert False
+                self.instrs[entry.mask][entry.value] = entry
+
 
     def setEndian(self, endian):
         self.endian = endian
@@ -32,9 +48,10 @@ class RiscVDisasm:
         ival, = struct.unpack_from(self.fmt, bytez, offset)
         print('hex ival = ', hex(ival))
 
-        for i in instructions:
-            if i.mask & ival == i.value:
-                found = i
+        for mask in self.instrs:
+            masked_value  = ival & mask
+            found = self.instrs[mask].get(masked_value)
+            if found is not None:
                 break
     
         opers = []

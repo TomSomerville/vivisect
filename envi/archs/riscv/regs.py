@@ -27,7 +27,7 @@ registers_mets = []
 
 status_meta = []
 
-class RISCVRegisterContext(e_reg.RegisterContext):
+class RiscVRegisterContext(e_reg.RegisterContext):
     def __init__(self):
         e_reg.RegisterContext.__init__(self)
         self.loadRegDef(registers_info)
