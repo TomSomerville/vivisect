@@ -10,7 +10,7 @@ from envi.archs.riscv.regs import *
 from envi.archs.riscv.instr_table import *
 from envi.archs.riscv.operands import *
 
-class riscvDisasm:
+class RiscVDisasm:
     def __init__(self, endian=envi.ENDIAN_LSB, psize=4):
         self.psize = psize
         self.setEndian(endian)
