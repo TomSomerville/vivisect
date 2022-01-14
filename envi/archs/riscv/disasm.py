@@ -17,24 +17,31 @@ class RiscVDisasm:
         self.setCategories()
 
     def setCategories(self):
-
-        self.instrs = {}
+        # True = 32 bit
+        # False = 16 bit
+        self.instrs = {True: {}, False: {}}
         xlen = self.psize * 8
         for entry in instructions:
-            if entry.mask not in self.instrs:
-                self.instrs[entry.mask] = {}
+            instr_size = entry.cat[0].cat != RISCV_CAT.C
+            if entry.mask not in self.instrs[instr_size]:
+                self.instrs[instr_size][entry.mask] = {}
             if any(cat.xlen == xlen for cat in entry.cat):
-                if entry.value in self.instrs[entry.mask]:
-                    print(self.instrs[entry.mask][entry.value])
-                    print(entry)
+                if entry.value in self.instrs[instr_size][entry.mask]:
                     assert False
-                self.instrs[entry.mask][entry.value] = entry
+
+                self.instrs[instr_size][entry.mask][entry.value] = entry
+
 
 
     def setEndian(self, endian):
         self.endian = endian
-        self.fmt = ('<I', '>I')[endian]
-
+        self.fmt = {
+            # True is 32 bit
+            # False is 16 bit
+            True: ('<I', '>I')[endian],
+            False: ('<H', '>H')[endian]
+        } 
+        
     def disasm(self, bytez, offset, va):
         # Stuff we'll be putting in the opcode object
         optype = None # This gets set if we successfully decode below
@@ -42,18 +49,22 @@ class RiscVDisasm:
         operands = []
         prefixes = 0
 
-        if offset & 0x3:
-            raise envi.InvalidAddress(offset)
+        # TODO; If RiscV ever supports Big Endian this may change
+        opcode_size = bytez[offset] & 0x3 == 0x3
 
-        ival, = struct.unpack_from(self.fmt, bytez, offset)
-        print('hex ival = ', hex(ival))
+        opcode_bytes = (2, 4)[opcode_size]
 
-        for mask in self.instrs:
+        ival, = struct.unpack_from(self.fmt[opcode_size], bytez, offset)
+        print(hex(ival))
+
+        for mask in self.instrs[opcode_size]:
             masked_value  = ival & mask
-            found = self.instrs[mask].get(masked_value)
+            found = self.instrs[opcode_size][mask].get(masked_value)
             if found is not None:
                 break
-    
+        else:
+            raise envi.InvalidInstruction(bytez[offset:offset+opcode_bytes], 'No Instruction Matched: %x' % ival, va)
+            
         opers = []
 
         for field in found.fields:
@@ -61,7 +72,8 @@ class RiscVDisasm:
             oper = OPERCLASSES[field.type](val, va)
             opers.append(oper)
 
-        return RiscVOpcode(va, found.opcode, found.name, 4, opers, found.flags)
+
+        return RiscVOpcode(va, found.opcode, found.name, opcode_bytes, opers, found.flags)
 
 OPERCLASSES = {
     RISCV_FIELD.REG: RiscVRegOper,

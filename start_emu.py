@@ -5,11 +5,21 @@ import envi
 
 import envi.common as e_common
 import logging
+import struct
 logger = logging.getLogger()
 
-def start(_archname=None, _verbose=0):
-    vw = vivisect.VivWorkspace()
+def parseBytes(value, size=4):
+    if size ==4:
+        data = struct.pack('<I', value)
+    else:
+        data = struct.pack('<H', value)
+    
+    return emu.archParseOpcode(data)
 
+
+def start(_archname=None, _verbose=0):
+    global emu, vw
+    vw = vivisect.VivWorkspace()
     # Copied from vivisect/parsers/blob.py
     vw.setMeta('Architecture', _archname)
     vw.setMeta('Platform', 'unknown')
@@ -26,7 +36,7 @@ def start(_archname=None, _verbose=0):
     emu = vw.getEmulator()
 
     from IPython import embed
-    embed()
+    embed(colors="neutral")
 
 
 if __name__ == '__main__':

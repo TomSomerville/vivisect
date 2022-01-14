@@ -21,7 +21,7 @@ RiscVcall = RiscVCall()
 
 class RiscVAbstractEmulator(envi.Emulator):
 
-    def __init__(self, archmod=None, endian=ENDIAN_MSB, psize=4):
+    def __init__(self, archmod=None, endian=ENDIAN_LSB, psize=4):
         self.psize = psize
         super(RiscVAbstractEmulator, self).__init__(archmod=archmod)
         self.setEndian(endian)
