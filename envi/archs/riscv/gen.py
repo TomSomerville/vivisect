@@ -699,6 +699,15 @@ def format_field_name(field):
         return field.value
 
 
+def fix_mnem(mnem):
+    # make the mnemonic lowercase
+    # Remove any "C." prefixes
+    if mnem.startswith('C.'):
+        return mnem[2:].lower()
+    else:
+        return mnem.lower()
+
+
 def export_instrs(forms, instrs, git_info):
     # Export all the forms
     form_list = list(forms.keys())
@@ -828,7 +837,7 @@ __all__ = ['instructions']
                 cats_str = ', '.join(cat_list)
 
             instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, (%s), %s)" % \
-                    (old_name, name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
+                    (fix_mnem(old_name), name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
             out.write("    %s,\n" % instr_str)
         out.write(')\n')
 
