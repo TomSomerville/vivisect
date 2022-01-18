@@ -12,16 +12,49 @@ from envi.archs.riscv.const import *
 #x5 alternate link register
 
 registers = [
-    'x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7', 'x8', 'x9', 'x10', 
-    'x11', 'x12', 'x13', 'x14', 'x15', 'x16', 'x17', 'x18', 'x19', 'x20', 
-    'x21', 'x22', 'x23', 'x24', 'x25', 'x26', 'x27', 'x28', 'x29', 'x30', 
-    'x31', 'pc'
+    'zero', 'ra', 'sp', 'gp', 'tp', 't0', 't1', 't2', 's0', 's1', 'a0', 
+    'a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 's2', 's3', 's4', 
+    's5', 's6', 's7', 's8', 's9', 's10', 's11', 't3', 't4', 't5', 
+    't6', 'pc'
 ]
 
 registers_info = [ (reg, 32) for reg in registers ]
 
 l = locals()
 e_reg.addLocalEnums(l, registers_info)
+
+REG_X0 = REG_ZERO
+REG_X1 = REG_RA
+REG_X2 = REG_SP
+REG_X3 = REG_GP
+REG_X4 = REG_TP
+REG_X5 = REG_T0
+REG_X6 = REG_T1
+REG_X7 = REG_T2
+REG_X8 = REG_S0
+REG_X9 = REG_S1
+REG_X10 = REG_A0
+REG_X11 = REG_A1
+REG_X12 = REG_A2
+REG_X13 = REG_A3
+REG_X14 = REG_A4
+REG_X15 = REG_A5
+REG_X16 = REG_A6
+REG_X17 = REG_A7
+REG_X18 = REG_S2
+REG_X19 = REG_S3
+REG_X20 = REG_S4
+REG_X21 = REG_S5
+REG_X22 = REG_S6
+REG_X23 = REG_S7
+REG_X24 = REG_S8
+REG_X25 = REG_S9
+REG_X26 = REG_S10
+REG_X27 = REG_S11
+REG_X28 = REG_T3
+REG_X29 = REG_T4
+REG_X30 = REG_T5
+REG_X31 = REG_T6
 
 registers_mets = []
 
