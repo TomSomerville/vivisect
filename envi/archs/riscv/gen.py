@@ -31,6 +31,11 @@ _reqbinfields = [
     r'funct[0-9]',
     r'opcode',
     r'op',
+    # Special constant/operand flags used by the FENCE instruction
+    r'fm',
+    # Special constant/operand flags used by the Atomic instructions
+    r'aq',
+    r'rl',
 ]
 
 _binvalues = [
@@ -49,17 +54,15 @@ _immvalues = _immfields + [
     r'shamt\[[^]]+\]',
     r'shamt',
     # Special IMM names used by the FENCE instruction
-    r'fm',
     r'pred',
     r'succ',
-    # Atomic operation IMM fields
-    r'aq',
-    r'rl',
-    r'csr',
     r'uimm',
     r'uimm\[[^]]+\]',
     r'nzimm\[[^]]+\]',
     r'nzuimm\[[^]]+\]',
+    # Atomic operation register fields (yes it's here in the IMM values on
+    # purpose)
+    r'csr',
 ]
 _regvalues = _regfields + [
     r'rs[0-9]?/rd\$\\n?eq\$0',
@@ -107,8 +110,11 @@ class OpcodeType(enum.Enum):
     CONST = enum.auto()
     IMM = enum.auto()
     RM = enum.auto()
+    MEM = enum.auto()
+    MEM_SP = enum.auto()
     C_OPCODE = enum.auto()
     C_REG = enum.auto()
+    CSR_REG = enum.auto()
 
 
 Form = namedtuple('Form', [
@@ -160,38 +166,14 @@ def get_instr_mask(fields):
     return (int(mask, 2), int(value, 2))
 
 
-def get_instr_flags(name, fields, priv=False):
-    # Return the correct set of flags for the instruction
-    #   envi.IF_NOFALL
-    #   envi.IF_PRIV
-    #   envi.IF_CALL
-    #   envi.IF_BRANCH
-    #   envi.IF_RET
-    #   envi.IF_COND
-    #   envi.IF_REPEAT
-    #   envi.IF_BRANCH_COND
-
-    flags = ''
-    if name in ('J', 'JR', 'C.JR', 'C.J'):
-        flags = 'envi.IF_CALL | envi.IF_NOFALL'
-    elif name in ('JAL', 'JALR', 'C.JAL', 'C.JALR'):
-        flags = 'envi.IF_CALL'
-    elif name in ('BEQ', 'BNE', 'BLT', 'BGE', 'BLTU', 'BGEU', 'C.BNEZ', 'C.BEQZ'):
-        flags = 'envi.IF_COND | envi.IF_BRANCH'
-
-    if flags and priv:
-        return flags + ' | envi.IF_PRIV'
-    elif flags:
-        return flags
-    elif priv:
-        return 'envi.IF_PRIV'
-    else:
-        return 0
-
-
 def get_field_type(field):
     if _immvaluepat.match(field):
-        return OpcodeType.IMM
+        # The CSR instructions place the CSR register field in the I-Type IMM
+        # field
+        if 'csr' in field:
+            return OpcodeType.CSR_REG
+        else:
+            return OpcodeType.IMM
     elif _regvaluepat.match(field):
         if 'prime' in field:
             return OpcodeType.C_REG
@@ -418,6 +400,45 @@ def add_instr(instrs, name, cat_list, form, fields, notes, priv=False):
     if 'HINT' in notes:
         print('Skipping HINT-ONLY instruction %s' % name)
         return
+
+    # Special cases:
+    # 1. For FENCE instructions the FM field should generate normal
+    #    FENCE (fm = 0) and FENCE.TSO (fm = 1) instructions
+    # 2. For Atomic instructions 4 should be generated:
+    #    INSTR (aq = 0, rl = 0)
+    #    INSTR.aq (aq = 1, rl = 0)
+    #    INSTR.rl (aq = 0, rl = 1)
+    #    INSTR.aq.rl (aq = 1, rl = 1) (
+    if any(f.value == 'fm' for f in fields):
+        # For some reason there already is a FENCE.TSO instruction in the
+        # scraped tables, so just modify FM to be fixed as 0 for the normal
+        # FENCE instruction
+        fm_field = next(f for f in fields if f.value == 'fm')
+        fm_zero_field = Field(0, fm_field.type, fm_field.columns, fm_field.bits, fm_field.bits, fm_field.shift)
+
+        # Now let the rest of this function run for FENCE
+        fields = [f if f.value != 'fm' else fm_zero_field for f in fields]
+
+    elif any(f.value == 'aq' for f in fields):
+        aq_field = next(f for f in fields if f.value == 'aq')
+        aq_zero_field = Field(0, aq_field.type, aq_field.columns, aq_field.bits, aq_field.bits, aq_field.shift)
+        aq_one_field = Field(1, aq_field.type, aq_field.columns, aq_field.bits, aq_field.bits, aq_field.shift)
+
+        rl_field = next(f for f in fields if f.value == 'rl')
+        rl_zero_field = Field(0, rl_field.type, rl_field.columns, rl_field.bits, rl_field.bits, rl_field.shift)
+        rl_one_field = Field(1, rl_field.type, rl_field.columns, rl_field.bits, rl_field.bits, rl_field.shift)
+
+        aq_fields = [f if f.value not in ('aq', 'rl') else aq_one_field if f.value == 'aq' else rl_zero_field for f in fields]
+        rl_fields = [f if f.value not in ('aq', 'rl') else aq_zero_field if f.value == 'aq' else rl_one_field for f in fields]
+        both_fields = [f if f.value not in ('aq', 'rl') else aq_one_field if f.value == 'aq' else rl_one_field for f in fields]
+
+        # Create the .aq, .rl, and .aq.rl instructions
+        add_instr(instrs, name+'.AQ', cat_list, form, aq_fields, notes, priv)
+        add_instr(instrs, name+'.RL', cat_list, form, rl_fields, notes, priv)
+        add_instr(instrs, name+'.AQ.RL', cat_list, form, both_fields, notes, priv)
+
+        # Now create the non-acquire or release instruction
+        fields = [f if f.value not in ('aq', 'rl') else aq_zero_field if f.value == 'aq' else rl_zero_field for f in fields]
 
     # Get the combined mask and post-mask value for this instruction
     op_mask, op_value = get_instr_mask(fields)
@@ -680,7 +701,7 @@ def scrape_instrs(git_repo):
     return forms, instrs
 
 
-def format_field_name(field):
+def get_field_name(field):
     # Make the field names look a little nicer
     if '\\vert' in field.value:
         # Squash any latex $\vert$ sequences into a ',' character
@@ -708,6 +729,305 @@ def fix_mnem(mnem):
         return mnem.lower()
 
 
+def get_field_flags(name, field):
+    flags = []
+    if field.type in (OpcodeType.REG, OpcodeType.C_REG):
+        if name.startswith('rs'):
+            flags.append('RISCV_OF.SRC')
+        elif name.startswith('rd'):
+            flags.append('RISCV_OF.DEST')
+        else:
+            raise Exception('unexpected register name %f' % field)
+    elif field.type == OpcodeType.CSR_REG:
+        # CSR registers/fields are always both source and destinations
+        flags.append('RISCV_OF.SRC')
+        flags.append('RISCV_OF.DEST')
+    elif name.startswith('imm'):
+        flags.append('RISCV_OF.SIGNED')
+    elif name.startswith('uimm'):
+        flags.append('RISCV_OF.UNSIGNED')
+    elif name.startswith('nzimm'):
+        flags.append('RISCV_OF.SIGNED')
+        flags.append('RISCV_OF.NON_ZERO')
+    elif name.startswith('nzuimm'):
+        flags.append('RISCV_OF.UNSIGNED')
+        flags.append('RISCV_OF.NON_ZERO')
+    return flags
+
+
+# In theory I could write an algorithm to figure this out... but that sounds
+# super annoying.  Here is a list of existing IMM fields and the resulting set
+# of masks, and shifts that can be OR'd together to create the final IMM
+# value. This table is indexed by the bit positioning and the field shift amount
+# as automatically calculated from the scraped field.
+#IMM_MASKS_AND_SHIFTS = {
+#    ((25, '[11:5]'), (7, '[4:0]'),): (
+#    ),
+#    ((25, '[12,10:5]'), (7, '[4:1,11]'),): (
+#    ),
+#    ((20, '[11:0]'),): (
+#        (0xFFF00000, 20),
+#    ),
+#    ((12, '[31:12]'),): (
+#        (0xFFFFF000, 0),
+#    ),
+#    ((12, '[20,10:1,11,19:12]'),): (
+#        (0x80000000, 11), (0x7FE00000, 20), (0x00100000, 9), (0x000FF000, 0),
+#    ),
+#    ((12, '[5]'), (2, '[4:0]'))
+#        (0x1000, 7), (0x007C, -2),
+#    ),
+#    ((12, '[5]'), (2, '[4,9:6]'))
+#        (0x1000, 7), (0x007C, -2),
+#    ),
+#    ((12, '[5]'), (2, '[4:2,7:6]'))
+#        (0x1000, 7), (0x0070, 2), (0x000C, -4),
+#    ),
+#    ((12, '[5]'), (2, '[4:3,8:6]'))
+#        (0x1000, 7), (0x0060, 2), (0x001C, -4),
+#    ),
+#                        7 6 543 2
+#    ((12, '[9]'), (2, '[4,6,8:7,5]'))
+#        (0x1000, 3), (0x0060, 3), (0x001C, -4),
+#    ),
+#    ((10, '[5:3]', 10), (5, '[7:6]'),): (
+#        (0x1C00, 7), (0x0060, -1),
+#    ),
+#    ((10, '[5:3]', 10), (5, '[2,6]'),): (
+#        (0x1C00, 7), (0x0040, 4), (0x0020, -1),
+#    ),
+#    ((10, '[5:3]'), (5, '[7:6]'),): (
+#    ),
+#    ((10, '[5:4,8]'), (5, '[7:6]'),): (
+#    ),
+#    ((10, '[8,4:3]'), (2, '[7:6,2:1,5]'),): (
+#    ),
+#    ((7, '[5:2,7:6]'),): (
+#        (0x1E00, 7), (0x0180, 1),
+#    ),
+#    ((7, '[5:3,8:6]'),): (
+#        (0x1C00, 7), (0x0380, 1),
+#    ),
+#    ((7, '[5:4,9:6]'),): (
+#        (0x1800, 7), (0x0780, 1),
+#    ),
+#    ((5, '[5:4,9:6,2,3]'),): (
+#        (0x1800, 7), (0x0780, 1), (0x0040, 4), (0x0020, 2),
+#    ),
+#    ((2, '[17]', 12), ('[16:12]'),): (
+#        (0x1000, -5), (0x007C, -10),
+#    ),
+#}
+#
+#
+#
+#imm_strs = set()
+
+
+imm_bits_pat = re.compile(r'^.*\[([0-9,:]+)]$')
+
+def create_imm_mask_and_shifts(names_and_fields_list):
+    parts = []
+    matches = [(f, imm_bits_pat.match(n)) for n, f in names_and_fields_list]
+
+    masks_and_shifts = []
+
+    # If there is a failed match then there should also be only 1 IMM field
+    if any(m == None for _, m in matches):
+        assert len(names_and_fields_list) == 1
+        # The standard RiscVField order of operations is shift then mask, so
+        # adjust the standard mask to work for the IMM-specific mask/shift
+        # order.
+        field = names_and_fields_list[0][1]
+        masks_and_shifts.append((field.mask << field.shift, field.shift))
+    else:
+        # Construct a list of operations
+        for f, m in matches:
+            pos = f.shift
+            for chunk in reversed(m.group(1).split(',')):
+                bit_values = chunk.split(':')
+                if len(bit_values) == 1:
+                    # Single bit
+                    start = int(bit_values[0])
+                    masks_and_shifts.append((1 << pos, pos - start))
+                    pos += 1
+                else:
+                    end = int(bit_values[0])
+                    start = int(bit_values[1])
+                    width = end - start + 1
+                    mask = int('0b' + ('1' * width) + ('0' * pos), 2)
+                    masks_and_shifts.append((mask, pos - start))
+                    pos += width
+    return tuple(masks_and_shifts)
+
+
+LOAD_INSTRS = (
+    'LB', 'LH', 'LW', 'LD', 'LQ', 'LBU', 'LHU', 'LWU', 'LDU',
+    'C.LW', 'C.LD', 'C.LQ', 'C.LWSP', 'C.LDSP', 'C.LQSP',
+    'FLH', 'FLW', 'FLD', 'FLQ',
+    'C.FLW', 'C.FLD', 'C.FLWSP', 'C.FLDSP',
+)
+
+STORE_INSTRS = (
+        'SB', 'SH', 'SW', 'SD', 'SQ',
+        'C.SW', 'C.SD', 'C.SQ', 'C.SWSP', 'C.SDSP', 'C.SQSP',
+        'FSH', 'FSW', 'FSD', 'FSQ',
+        'C.FSW', 'C.FSD', 'C.FSWSP', 'C.FSDSP',
+)
+
+OP_MEM_SIZES = (
+    ('RISCV_OF.BYTE',       ('LB', 'LBU', 'SB')),
+    ('RISCV_OF.HALFWORD',   ('LH', 'LHU', 'FLH', 'SH')),
+    ('RISCV_OF.WORD',       ('LW', 'LWU', 'C.LW', 'C.LWSP', 'FLW', 'C.FLW',
+                             'C.FLWSP', 'SW', 'C.SW', 'FSW', 'C.FSW',
+                             'C.FSWSP')),
+    ('RISCV_OF.DOUBLEWORD', ('LD', 'LDU', 'C.LD', 'C.LDSP', 'FLD', 'C.FLD',
+                             'C.FLDSP', 'SD', 'C.SD', 'FSD', 'C.FSD',
+                             'C.FSDSP')),
+    ('RISCV_OF.QUADWORD',   ('LQ', 'C.LQ', 'C.LQSP', 'FLQ', 'SQ', 'C.SQ',
+                             'C.SQSP')),
+)
+
+
+def get_instr_flags(name, fields, priv=False):
+    """
+    Return the correct set of standard envi flags for the instruction
+      envi.IF_NOFALL
+      envi.IF_PRIV
+      envi.IF_CALL
+      envi.IF_BRANCH
+      envi.IF_RET
+      envi.IF_COND
+      envi.IF_REPEAT
+      envi.IF_BRANCH_COND
+    """
+
+    flags = []
+    if name in ('J', 'JR', 'C.JR', 'C.J'):
+        flags.append('envi.IF_CALL')
+        flags.append('envi.IF_NOFALL')
+    elif name in ('JAL', 'JALR', 'C.JAL', 'C.JALR'):
+        flags.append('envi.IF_CALL')
+    elif name in ('BEQ', 'BNE', 'BLT', 'BGE', 'BLTU', 'BGEU', 'C.BNEZ', 'C.BEQZ'):
+        flags.append('envi.IF_COND')
+        flags.append('envi.IF_BRANCH')
+
+    if priv:
+        flags.append('envi.IF_PRIV')
+
+    return flags
+
+
+def get_instr_final_flags(instr):
+    """
+    Return the complete flag list for an instruction based on all gathered
+    information
+    """
+    flags = instr.flags
+
+    if instr.name in LOAD_INSTRS:
+        if instr.name.endswith('SP'):
+            flags.append('RISCV_IF.LOAD_SP')
+        else:
+            flags.append('RISCV_IF.LOAD')
+    elif instr.name in STORE_INSTRS:
+        if instr.name.endswith('SP'):
+            flags.append('RISCV_IF.STORE_SP')
+        else:
+            flags.append('RISCV_IF.STORE')
+
+    if flags:
+        return ' | '.join(flags)
+    else:
+        return '0'
+
+
+def get_instr_mnem(mnem):
+    """
+    Make the mnemonic lowercase and remove any "C." prefixes
+    """
+    if mnem.startswith('C.'):
+        return mnem[2:].lower()
+    else:
+        return mnem.lower()
+
+
+def get_instr_name(name):
+    """
+    Replace all load/store instructions with a single LOAD/STORE instruction.
+    Otherwise just change any '.'s to '_'s
+    """
+    if name in LOAD_INSTRS:
+        return 'LOAD'
+    elif name in STORE_INSTRS:
+        return 'STORE'
+    else:
+        return name.replace('.', '_')
+
+
+def make_field_args_str(mask, shift, flags=None):
+    return 'RiscVFieldArgs(0x%x, %d)' % (mask, shift)
+
+
+# Mapping of RiscV*Field type used by the make_field_str() function
+FIELD_TYPE_MAP = {
+    OpcodeType.REG: 'RiscVField',
+    OpcodeType.C_REG: 'RiscVField',
+    OpcodeType.CSR_REG: 'RiscVField',
+    OpcodeType.RM: 'RiscVField',
+    OpcodeType.IMM: 'RiscVImmField',
+    OpcodeType.MEM: 'RiscVMemField',
+    OpcodeType.MEM_SP: 'RiscVMemSPField',
+}
+
+
+def make_field_str(instr_name, op, *extra_args, field_type=None, field_name=None):
+    if field_type is None:
+        field_type = op.type
+    named_type = FIELD_TYPE_MAP[field_type]
+
+    if field_name is None:
+        field_name = get_field_name(op)
+    flags = get_field_flags(field_name, op)
+    # Add in instruction-specific flags
+    for flag, instr_list in OP_MEM_SIZES:
+        if instr_name in instr_list:
+            flags.append(flag)
+    if flags:
+        flags_str = ' | '.join(flags)
+    else:
+        flags_str = '0'
+
+    if not extra_args:
+        args_str = '%d, 0x%x' % (op.shift, op.mask)
+    else:
+        # We need to support multiple argument lists, because the RiscVMemField
+        # has an argument list for the base register and a second argument list
+        # for the offset immediate value.
+        field_args = []
+        for args in extra_args:
+            # If this argument a tuple of two integers, just make the field,
+            # otherwise make a list of fields.
+            if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
+                field_args.append(make_field_args_str(*args))
+            else:
+                # Each individual set of args should be wrapped in parenthesis
+                field_args.append('(' + ', '.join(make_field_args_str(*a) for a in args) + ',)')
+        # Don't wrap the field args in parenthesis, more args list means more
+        # required positional args to this field
+        args_str = ', '.join(field_args)
+
+    operand_str = "%s('%s', RISCV_FIELD.%s, %s, %s)" % \
+            (named_type, field_name, field_type.name, args_str, flags_str)
+
+    return operand_str
+
+
+# Only some "opcode" fields are exported
+EXPORT_FIELDS = (OpcodeType.REG, OpcodeType.C_REG, OpcodeType.CSR_REG,
+        OpcodeType.IMM, OpcodeType.RM)
+
+
 def export_instrs(forms, instrs, git_info):
     # Export all the forms
     form_list = list(forms.keys())
@@ -720,14 +1040,14 @@ def export_instrs(forms, instrs, git_info):
     # remove any embedded '.'s.  Also while looping through the instruction
     # categories build up a list of all the categories that each instruction is
     # present in.
-    riscv_name_lookup = {}
+    instr_to_cat_map = {}
     for cat, cat_data in instrs.items():
-        for instr_name in cat_data.keys():
-            new_name = instr_name.replace('.', '_')
-            if new_name not in riscv_name_lookup:
-                riscv_name_lookup[new_name] = [instr_name, [cat]]
+        for name in cat_data.keys():
+            if name not in instr_to_cat_map:
+                # generate the RISCV_INSTR const string now
+                instr_to_cat_map[name] = (get_instr_name(name), [cat])
             else:
-                riscv_name_lookup[new_name][1].append(cat)
+                instr_to_cat_map[name][1].append(cat)
 
     # Create these files in the envi/archs/riscv/ directory, not the directory
     # that the python command is run in (which is what os.getcwd() will return).
@@ -740,7 +1060,8 @@ def export_instrs(forms, instrs, git_info):
         out.write('\n')
 
         # These constants will be IntEnums
-        out.write('import enum\n\n\n')
+        out.write('import enum\n')
+        out.write('from collections import namedtuple\n\n\n')
 
         # Write the custom IF_??? and OF_??? flags used by RISC-V instructions
         # (if any)
@@ -762,13 +1083,81 @@ def export_instrs(forms, instrs, git_info):
 
         # Write out the field types
         out.write('class RISCV_FIELD(enum.IntEnum):\n')
-        for field_type in ('REG', 'C_REG', 'IMM', 'RM'):
+        for field_type in ('REG', 'C_REG', 'CSR_REG', 'MEM', 'MEM_SP', 'IMM', 'RM'):
             out.write('    %s = enum.auto()\n' % field_type)
         out.write('\n\n')
 
+        # Get a list of all of the instructions
+        instr_consts = set(n for n, _ in instr_to_cat_map.values())
         out.write('class RISCV_INS(enum.IntEnum):\n')
-        for instr in riscv_name_lookup.keys():
+        for instr in instr_consts:
             out.write('    %s = enum.auto()\n' % instr.upper())
+        out.write('\n')
+
+        # Write out the RiscV instruction and operand flags
+        out.write('''
+# Additional RiscV-specific instruction flags
+class RISCV_IF(enum.IntFlag):
+    # Indicate normal load/store instructions
+    LOAD        = 1 << 8
+    STORE       = 1 << 9
+
+    # Indicate this is a compressed load/store instruction that uses the SP (x2)
+    # as the base register
+    LOAD_SP     = 1 << 10
+    STORE_SP    = 1 << 11
+
+
+# RiscV operand flags
+class RISCV_OF(enum.IntFlag):
+    SRC         = 1 << 1
+    DEST        = 1 << 2
+    NON_ZERO    = 1 << 3
+    SIGNED      = 1 << 4
+    UNSIGNED    = 1 << 5
+
+    # Flags used to indicate size these definitions match those used in the
+    # RiscV manual
+    BYTE        = 1 << 6   # 1 byte
+    HALFWORD    = 1 << 7   # 2 bytes
+    WORD        = 1 << 8   # 4 bytes
+    DOUBLEWORD  = 1 << 9   # 8 bytes
+    QUADWORD    = 1 << 10  # 16 bytes
+''')
+
+        # Now write the namedtuple types used in construction of the instruction
+        # table.
+        out.write('''
+# Standard types used in the generated instruction list
+RiscVInsCat = namedtuple('RiscVInsCat', ['xlen', 'cat'])
+RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
+
+# A simple field where the field value can be masked and shifted out of the
+# instruction value.
+RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
+
+# Many RiscV instructions have complex immediate values like:
+#   BEQ  imm[12,10:5] | rs2 | rs1 | imm[4:1,11]
+#
+# This field type contains a list of mask and shift operations that can be used
+# to re-assemble the correct immediate from the instruction value
+RiscVImmField = namedtuple('RiscVImmField', ['name', 'type', 'imm_args', 'flags'])
+
+# RiscV load/store instructions use an immediate value to define an offset from
+# a source/base register This field contains the arguments necessary to extract
+# the source register value and immediate offset value from the instruction
+# value
+#   LWU  imm[11:0] | rs1 | rd
+RiscVMemField = namedtuple('RiscVMemField', ['name', 'type', 'rs1_args', 'imm_args', 'flags'])
+
+# RiscV compressed load/store instructions are like normal load/store
+# instructions but they always use the x2 (the stack pointer) register as the
+# base register
+RiscVMemSPField = namedtuple('RiscVMemSPField', ['name', 'type', 'imm_args', 'flags'])
+
+# A field type to hold mask/shift arguments for IMM and MEM fields
+RiscVFieldArgs = namedtuple('RiscVFieldArgs', ['mask', 'shift'])
+''')
 
     with open(os.path.join(cur_dir, 'instr_table.py'), 'w') as out:
         # First log the git information
@@ -778,14 +1167,8 @@ def export_instrs(forms, instrs, git_info):
 
         # Dump the types used to encode the instructions
         out.write('''
-from collections import namedtuple
-
 import envi
-from envi.archs.riscv.const import RISCV_FORM, RISCV_INS, RISCV_FIELD, RISCV_CAT
-
-RiscVInsCat = namedtuple('RiscVInsCat', ['xlen', 'cat'])
-RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
-RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'value', 'fields', 'flags'])
+from envi.archs.riscv.const import *
 
 __all__ = ['instructions']
 
@@ -803,43 +1186,103 @@ __all__ = ['instructions']
         # - Is the 'funct' field something that would be useful to turn into
         #   flags or some other info?
         out.write('instructions = (\n')
-        for name, (old_name, cats) in riscv_name_lookup.items():
-            instr = instrs[cats[0]][old_name]
+        try:
+            for name, (instr_name, cats) in instr_to_cat_map.items():
+                instr = instrs[cats[0]][name]
+                all_fields = [(get_field_name(op), op) for op in instr.fields if op.type in EXPORT_FIELDS]
 
-            # Only register and immediate fields should be printed
-            operand_list = []
-            # In general the operands should be displayed in reverse order than
-            # they are encoded in the instruction so reverse the operand fields
-            # now.
-            for op in reversed(instr.fields):
-                if op.type in (OpcodeType.IMM, OpcodeType.RM, OpcodeType.C_REG, OpcodeType.REG):
-                    # TODO: for now the operand flags field is a placeholder
-                    operand_list.append("RiscVField('%s', RISCV_FIELD.%s, %d, 0x%x, %s)" % \
-                            (format_field_name(op), op.type.name, op.shift, op.mask, 0))
-            if len(operand_list) == 1:
-                operand_str = operand_list[0]
-            else:
-                operand_str = ', '.join(operand_list)
+                imm_fields = [(fn, op) for fn, op in all_fields \
+                        if op.type == OpcodeType.IMM and ('imm' in fn or 'shamt' in fn)]
 
-            # Turn the categories from strings into RiscVInsCat values
-            cat_list = []
-            cat_parts_pat = re.compile(r'^RV([0-9]+)([^ ]*)$')
-            for cat in cats:
-                match = cat_parts_pat.search(cat)
-                assert match
-                cat_list.append('RiscVInsCat(%s, RISCV_CAT.%s)' % (match.group(1), match.group(2)))
+                non_imm_fields = [(fn, op) for fn, op in all_fields \
+                        if op.type == OpcodeType.IMM and 'imm' not in fn and 'shamt' not in fn]
 
-            if len(cat_list) == 1:
-                #cats_str = 'RISCV_CAT.' + cat[0] + ','
-                cats_str = '%s,' % cat_list[0]
-            else:
-                #cats_str = ', '.join('RISCV_CAT.' + c for c in cats)
-                cats_str = ', '.join(cat_list)
+                if name in LOAD_INSTRS or name in STORE_INSTRS:
+                    fields = [op for fn, op in non_imm_fields if 'rs1' not in fn]
+                    imm_args = create_imm_mask_and_shifts(imm_fields)
 
-            instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, (%s), 0x%x, 0x%x, (%s), %s)" % \
-                    (fix_mnem(old_name), name, instr.form, cats_str, instr.mask, instr.value, operand_str, instr.flags)
-            out.write("    %s,\n" % instr_str)
-        out.write(')\n')
+                    rs1_op = [op for fn, op in all_fields if 'rs1' in fn]
+                    if rs1_op:
+                        assert len(rs1_op) == 1
+                        rs1_args = (rs1_op[0].shift, rs1_op[0].mask)
+                        last_field = make_field_str(name, imm_fields[0][1],
+                                rs1_args, imm_args, field_type=OpcodeType.MEM)
+                    else:
+                        # This should only be true for "compressed" load
+                        # instructions
+                        assert name.startswith('C.')
+                        last_field = make_field_str(name, imm_fields[0][1],
+                                imm_args, field_type=OpcodeType.MEM_SP)
+
+                elif imm_fields:
+                    # Build a list of only the non-imm fields to be turned into
+                    # operands
+                    fields = [op for _, op in non_imm_fields]
+                    imm_args = create_imm_mask_and_shifts(imm_fields)
+
+                    # Extract the non-bits portion of the first field name to
+                    # identify what this one should be called.
+                    imm_field_name = imm_fields[0][1].value.split('[', 1)[0]
+
+                    last_field = make_field_str(name, imm_fields[0][1], imm_args,
+                            field_type=OpcodeType.IMM, field_name=imm_field_name)
+
+                elif any(op.type == OpcodeType.RM for op in instr.fields):
+                    # If there is a rounding mode operand in this instruction move
+                    # it to the end of the operand list
+                    fields = [op for _, op in all_fields if op.type != OpcodeType.RM]
+                    rm_op = next(op for _, op in all_fields if op.type == OpcodeType.RM)
+                    last_field = make_field_str(name, rm_op)
+
+                else:
+                    fields = [op for _, op in all_fields]
+                    last_field = None
+
+                operand_list = []
+                # In general regsiter operands should be displayed in reverse order
+                # than they are encoded in the instruction so reverse the operand
+                # fields now.
+                for op in reversed(fields):
+                    if op.type in (OpcodeType.REG, OpcodeType.C_REG, OpcodeType.CSR_REG):
+                        operand_list.append(make_field_str(name, op))
+                    elif op.type == OpcodeType.IMM and op.value in ('pred', 'succ'):
+                        # The 'pred' and 'succ' fields should be normal IMM, but
+                        # they are not moved to the end of the param list so
+                        # they should be processed in place here.
+
+                        # Convert the normal shift/mask values into IMM
+                        # mask/shift values
+                        imm_args = ((op.mask << op.shift, op.shift),)
+                        operand_list.append(make_field_str(name, op, imm_args))
+                    else:
+                        print('%s missing %r field' % (name, op))
+
+                if last_field is not None:
+                    operand_list.append(last_field)
+
+                # Turn the categories from strings into RiscVInsCat values
+                cat_list = []
+                cat_parts_pat = re.compile(r'^RV([0-9]+)([^ ]*)$')
+                for cat in cats:
+                    match = cat_parts_pat.search(cat)
+                    assert match
+                    cat_list.append('RiscVInsCat(%s, RISCV_CAT.%s)' % (match.group(1), match.group(2)))
+
+                # we need to have a trailing comma on the category and fields
+                # lists so a single-element list will be correctly created as a
+                # tuple
+                cats_str = '(' + ', '.join(cat_list) + ',)'
+                if operand_list:
+                    operand_str = '(' + ', '.join(operand_list) + ',)'
+                else:
+                    operand_str = '()'
+                instr_str = "RiscVIns('%s', RISCV_INS.%s, RISCV_FORM.%s, %s, 0x%x, 0x%x, %s, %s)" % \
+                        (get_instr_mnem(name), instr_name, instr.form, cats_str, \
+                        instr.mask, instr.value, operand_str, \
+                        get_instr_final_flags(instr))
+                out.write("    %s,\n" % instr_str)
+        finally:
+            out.write(')\n')
 
 
 def main(git_repo):
