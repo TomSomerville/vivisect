@@ -755,75 +755,6 @@ def get_field_flags(name, field):
     return flags
 
 
-# In theory I could write an algorithm to figure this out... but that sounds
-# super annoying.  Here is a list of existing IMM fields and the resulting set
-# of masks, and shifts that can be OR'd together to create the final IMM
-# value. This table is indexed by the bit positioning and the field shift amount
-# as automatically calculated from the scraped field.
-#IMM_MASKS_AND_SHIFTS = {
-#    ((25, '[11:5]'), (7, '[4:0]'),): (
-#    ),
-#    ((25, '[12,10:5]'), (7, '[4:1,11]'),): (
-#    ),
-#    ((20, '[11:0]'),): (
-#        (0xFFF00000, 20),
-#    ),
-#    ((12, '[31:12]'),): (
-#        (0xFFFFF000, 0),
-#    ),
-#    ((12, '[20,10:1,11,19:12]'),): (
-#        (0x80000000, 11), (0x7FE00000, 20), (0x00100000, 9), (0x000FF000, 0),
-#    ),
-#    ((12, '[5]'), (2, '[4:0]'))
-#        (0x1000, 7), (0x007C, -2),
-#    ),
-#    ((12, '[5]'), (2, '[4,9:6]'))
-#        (0x1000, 7), (0x007C, -2),
-#    ),
-#    ((12, '[5]'), (2, '[4:2,7:6]'))
-#        (0x1000, 7), (0x0070, 2), (0x000C, -4),
-#    ),
-#    ((12, '[5]'), (2, '[4:3,8:6]'))
-#        (0x1000, 7), (0x0060, 2), (0x001C, -4),
-#    ),
-#                        7 6 543 2
-#    ((12, '[9]'), (2, '[4,6,8:7,5]'))
-#        (0x1000, 3), (0x0060, 3), (0x001C, -4),
-#    ),
-#    ((10, '[5:3]', 10), (5, '[7:6]'),): (
-#        (0x1C00, 7), (0x0060, -1),
-#    ),
-#    ((10, '[5:3]', 10), (5, '[2,6]'),): (
-#        (0x1C00, 7), (0x0040, 4), (0x0020, -1),
-#    ),
-#    ((10, '[5:3]'), (5, '[7:6]'),): (
-#    ),
-#    ((10, '[5:4,8]'), (5, '[7:6]'),): (
-#    ),
-#    ((10, '[8,4:3]'), (2, '[7:6,2:1,5]'),): (
-#    ),
-#    ((7, '[5:2,7:6]'),): (
-#        (0x1E00, 7), (0x0180, 1),
-#    ),
-#    ((7, '[5:3,8:6]'),): (
-#        (0x1C00, 7), (0x0380, 1),
-#    ),
-#    ((7, '[5:4,9:6]'),): (
-#        (0x1800, 7), (0x0780, 1),
-#    ),
-#    ((5, '[5:4,9:6,2,3]'),): (
-#        (0x1800, 7), (0x0780, 1), (0x0040, 4), (0x0020, 2),
-#    ),
-#    ((2, '[17]', 12), ('[16:12]'),): (
-#        (0x1000, -5), (0x007C, -10),
-#    ),
-#}
-#
-#
-#
-#imm_strs = set()
-
-
 imm_bits_pat = re.compile(r'^.*\[([0-9,:]+)]$')
 
 def create_imm_mask_and_shifts(names_and_fields_list):
@@ -999,7 +930,8 @@ def make_field_str(instr_name, op, *extra_args, field_type=None, field_name=None
         flags_str = '0'
 
     if not extra_args:
-        args_str = '%d, 0x%x' % (op.shift, op.mask)
+        # Turn the old shift/mask operands into the newer mask/shift tuple
+        args_str = make_field_args_str(op.mask << op.shift, op.shift)
     else:
         # We need to support multiple argument lists, because the RiscVMemField
         # has an argument list for the base register and a second argument list
@@ -1088,7 +1020,7 @@ def export_instrs(forms, instrs, git_info):
         out.write('\n\n')
 
         # Get a list of all of the instructions
-        instr_consts = set(n for n, _ in instr_to_cat_map.values())
+        instr_consts = sorted(set(n for n, _ in instr_to_cat_map.values()))
         out.write('class RISCV_INS(enum.IntEnum):\n')
         for instr in instr_consts:
             out.write('    %s = enum.auto()\n' % instr.upper())
@@ -1134,7 +1066,7 @@ RiscVIns = namedtuple('RiscVIns', ['name', 'opcode', 'form', 'cat', 'mask', 'val
 
 # A simple field where the field value can be masked and shifted out of the
 # instruction value.
-RiscVField = namedtuple('RiscVField', ['name', 'type', 'shift', 'mask', 'flags'])
+RiscVField = namedtuple('RiscVField', ['name', 'type', 'args', 'flags'])
 
 # Many RiscV instructions have complex immediate values like:
 #   BEQ  imm[12,10:5] | rs2 | rs1 | imm[4:1,11]
