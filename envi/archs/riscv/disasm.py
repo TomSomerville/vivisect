@@ -40,8 +40,8 @@ class RiscVDisasm:
             # False is 16 bit
             True: ('<I', '>I')[endian],
             False: ('<H', '>H')[endian]
-        } 
-        
+        }
+
     def disasm(self, bytez, offset, va):
         # Stuff we'll be putting in the opcode object
         optype = None # This gets set if we successfully decode below
@@ -64,20 +64,17 @@ class RiscVDisasm:
                 break
         else:
             raise envi.InvalidInstruction(bytez[offset:offset+opcode_bytes], 'No Instruction Matched: %x' % ival, va)
-            
-        opers = []
 
-        for field in found.fields:
-            val = (ival >> field.shift) & field.mask
-            oper = OPERCLASSES[field.type](val, va)
-            opers.append(oper)
-
-
+        opers = tuple(OPERCLASSES[f.type](ival=ival, args=f.args va=va, oflags=f.flags) for f in found.fields)
         return RiscVOpcode(va, found.opcode, found.name, opcode_bytes, opers, found.flags)
+
 
 OPERCLASSES = {
     RISCV_FIELD.REG: RiscVRegOper,
+    RISCV_FIELD.C_REG: RiscVCRegOper,
+    RISCV_FIELD.CSR_REG = RiscVCSRRegOper,
+    RISCV_FIELD.MEM: RiscVMemOper,
+    RISCV_FIELD.MEM_SP: RiscVMemSPOper,
     RISCV_FIELD.IMM: RiscVImmOper,
-    RISCV_FIELD.RM: RiscVImmOper,
-    RISCV_FIELD.C_REG: RiscVRegOper,
-    }
+    RISCV_FIELD.RM: RiscVRMOper,
+}
