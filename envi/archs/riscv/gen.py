@@ -932,10 +932,13 @@ def make_field_str(instr_name, op, args=None, field_type=None, field_name=None):
     if not args:
         # Turn the old shift/mask operands into the newer mask/shift tuple
         args_str = make_field_args_str(op.mask << op.shift, op.shift)
+    elif len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
+        # Check if the args are a simple (int, int) tuple
+        args_str = make_field_args_str(*arglist)
     else:
-        # We need to support multiple argument lists, because the RiscVMemField
-        # has an argument list for the base register and a second argument list
-        # for the offset immediate value.
+        # We need to support multiple argument lists, because the
+        # RiscVMemField has an argument list for the base register and a
+        # second argument list for the offset immediate value.
         field_args = []
         for arglist in args:
             # If this argument a tuple of two integers, just make the field,
@@ -948,7 +951,7 @@ def make_field_str(instr_name, op, args=None, field_type=None, field_name=None):
                 field_args.append('(' + ', '.join(make_field_args_str(*a) for a in arglist) + ',)')
         # Don't wrap the field args in parenthesis, more args list means more
         # required positional args to this field
-        args_str = ', '.join(field_args)
+        args_str = '(' + ', '.join(field_args) + ',)'
 
     operand_str = "%s('%s', RISCV_FIELD.%s, (%s), %s)" % \
             (named_type, field_name, field_type.name, args_str, flags_str)
@@ -1124,11 +1127,11 @@ __all__ = ['instructions']
                 instr = instrs[cats[0]][name]
                 all_fields = [(get_field_name(op), op) for op in instr.fields if op.type in EXPORT_FIELDS]
 
-                imm_fields = [(fn, op) for fn, op in all_fields \
-                        if op.type == OpcodeType.IMM and ('imm' in fn or 'shamt' in fn)]
+                imm_fields = [(fn, op) for fn, op in all_fields if \
+                        op.type == OpcodeType.IMM and ('imm' in fn or 'shamt' in fn)]
 
-                non_imm_fields = [(fn, op) for fn, op in all_fields \
-                        if op.type == OpcodeType.IMM and 'imm' not in fn and 'shamt' not in fn]
+                non_imm_fields = [(fn, op) for fn, op in all_fields if not
+                        (op.type == OpcodeType.IMM and ('imm' in fn or 'shamt' in fn))]
 
                 if name in LOAD_INSTRS or name in STORE_INSTRS:
                     fields = [op for fn, op in non_imm_fields if 'rs1' not in fn]
