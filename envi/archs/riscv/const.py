@@ -3,6 +3,26 @@ import enum
 from envi.archs.riscv.const_gen import *
 
 
+__all__ = [
+    # Defined in this file
+    'RISCV_CAT',
+
+    # Defined in const_gen
+    'RISCV_FORM',
+    'RISCV_FIELD',
+    'RISCV_INS',
+    'RISCV_IF',
+    'RISCV_OF',
+    'RiscVInsCat',
+    'RiscVIns',
+    'RiscVField',
+    'RiscVImmField',
+    'RiscVMemField',
+    'RiscVMemSPField',
+    'RiscVFieldArgs',
+]
+
+
 class RISCV_CAT(enum.IntFlag):
     """
     RISC-V Instruction categories

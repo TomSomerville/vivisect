@@ -1,7 +1,9 @@
 import envi
 import envi.archs.riscv.regs as riscv_regs
 
+
 IF_CALLCC = (envi.IF_CALL | envi.IF_COND)
+
 
 class RiscVOpcode(envi.Opcode):
     def __init__(self, va, opcode, mnem, size, opers, iflags=0):
@@ -9,7 +11,7 @@ class RiscVOpcode(envi.Opcode):
 
     def getBranches(self, emu=None):
         ret = []
-        
+
         flags = 0
         addb = False
 
@@ -67,15 +69,13 @@ class RiscVOpcode(envi.Opcode):
             if i != lasti:
                 mcanv.addText(",")
 
+
 class RiscVRegOper(envi.RegisterOper):
-    #reg == 5 bit number from disasm.py
-    #va == memory address
-    #oflags == not used at the moment. 
-    def __init__(self, reg, va=0, oflags=0):
+    def __init__(self, field_config, va=0, oflags=0):
         self.va = va
         self.reg = reg
         self.oflags = oflags
-    
+
     def __eq__(self, oper):
         if not isinstance(oper, self.__class__):
             return False
@@ -90,7 +90,7 @@ class RiscVRegOper(envi.RegisterOper):
 
     def getWidth(self, emu):
         return emu.getRegisterWidth(self.reg) // 8
-        
+
     def getOperValue(self, op, emu=None):
         if self.reg == REG_PC:
             return self.va
@@ -116,7 +116,7 @@ class RiscVRegOper(envi.RegisterOper):
         rname = self.repr(op)
         mcanv.addNameText(rname, typename='registers')
 
-#line 345 of envi/__init__.py - aaron please verify correct class here...
+
 class RiscVImmOper(envi.ImmedOper):
     def __init__(self, val, va=0):
         self.val = val
@@ -168,9 +168,9 @@ class RiscVImmOper(envi.ImmedOper):
     def getOperAddr(self):
         return None
 
-    #shouldnt be needed for Immediates
     def setOperValue(self):
         pass
+
 
 class RiscVCRegOper(RiscVRegOper):
     def __init__(self, c_reg, va=0, oflags=0):
