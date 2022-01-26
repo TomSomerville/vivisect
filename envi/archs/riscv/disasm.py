@@ -51,11 +51,9 @@ class RiscVDisasm:
 
         # TODO; If RiscV ever supports Big Endian this may change
         opcode_size = bytez[offset] & 0x3 == 0x3
-
         opcode_bytes = (2, 4)[opcode_size]
 
         ival, = struct.unpack_from(self.fmt[opcode_size], bytez, offset)
-        print(hex(ival))
 
         for mask in self.instrs[opcode_size]:
             masked_value  = ival & mask
