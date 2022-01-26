@@ -71,9 +71,9 @@ class RiscVOpcode(envi.Opcode):
 
 
 class RiscVRegOper(envi.RegisterOper):
-    def __init__(self, field_config, va=0, oflags=0):
+    def __init__(self, args, ival, va=0, oflags=0):
         self.va = va
-        self.reg = reg
+        self.reg = (ival & args.mask) >> args.shift
         self.oflags = oflags
 
     def __eq__(self, oper):
@@ -117,10 +117,158 @@ class RiscVRegOper(envi.RegisterOper):
         mcanv.addNameText(rname, typename='registers')
 
 
-class RiscVImmOper(envi.ImmedOper):
-    def __init__(self, val, va=0):
-        self.val = val
+class RiscVCRegOper(RiscVRegOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        super().__init__(reg, args, ival, oflags)
+        # To convert the compressed register values to real registers add 8
+        self.reg += 8
+
+
+class RiscVCSRRegOper(RiscVRegOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        super().__init__(reg, args, ival, oflags)
+        # The register number in the instruction is a CSR meta regsiter
+        self.csr_reg = self.reg
+        # Get the real Meta register value
+        self.reg = CSR_REGISTER_METAS.get(self.csr_reg)
+
+    def repr(self, op):
+        return CSR_REGISTER_NAMES.get(self.csr_reg, 'invalid')
+
+
+class RiscVMemOper(envi.DerefOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        # The args for MemOper is a tuple of: base register args and a list of
+        # imm args
+        base_reg_args, imm_args = args
+        self.base_reg = (ival & base_reg_args.mask) >> base_reg_args.shift
+        self.offset = sum((ival & a.mask) >> a.shift for a in imm_args)
         self.va = va
+        self.oflags = oflags
+        self._set_tsize()
+
+    def _set_tsize(self):
+        # TODO: we can probably speed this up
+        if self.oflags & RISCV_OF.BYTE:
+            self.tsize = 1
+        elif self.oflags & RISCV_OF.HALFWORD:
+            self.tsize = 2
+        elif self.oflags & RISCV_OF.WORD:
+            self.tsize = 4
+        elif self.oflags & RISCV_OF.DOUBLEWORD:
+            self.tsize = 8
+        elif self.oflags & RISCV_OF.QUADWORD:
+            self.tsize = 16
+        else:
+            raise envi.InvalidInstruction(mesg='Invalid instruction flags for memory access: 0x%x' % oflags)
+
+    def __eq__(self, oper):
+        return isinstance(oper, self.__class__) \
+            and self.base_reg == oper.base_reg \
+            and self.offset == oper.offset
+
+    def _get_offset(self, emu=None):
+        return self.offset
+
+    def _get_base_reg(self, emu=None):
+        if emu is None:
+            return None
+        return emu.getRegister(self.base_reg)
+
+    def involvesPC(self):
+        return False
+
+    def setOperValue(self, op, emu=None, val=None):
+        if emu is None:
+            return None
+
+        addr = self.getOperAddr(op, emu)
+
+        fmt = e_bits.fmt_chars[emu.getEndian()].get(self.tsize)
+        if fmt is not None:
+            val &= e_bits.u_maxes[self.tsize]
+            emu.writeMemoryFormat(addr, fmt, val)
+        elif self.tsize == 16:
+            lower_val = val & e_bits.u_maxes[8]
+            upper_val = (val >> 64) & e_bits.u_maxes[8]
+            if emu.getEndian() == envi.ENDIAN_LSB:
+                emu.writeMemoryFormat(addr, fmt, lower_val)
+                emu.writeMemoryFormat(addr, fmt+8, upper_val)
+            else:
+                emu.writeMemoryFormat(addr, fmt+8, lower_val)
+                emu.writeMemoryFormat(addr, fmt, upper_val)
+
+    def getOperValue(self, op, emu=None):
+        if emu is None:
+            return None
+
+        addr = self.getOperAddr(op, emu)
+
+        fmt = e_bits.fmt_chars[emu.getEndian()].get(self.tsize)
+        if fmt is not None:
+            ret, = emu.readMemoryFormat(addr, fmt)
+        elif self.tsize == 16:
+            lower_val = val & e_bits.u_maxes[8]
+            upper_val = (val >> 64) & e_bits.u_maxes[8]
+            if emu.getEndian() == envi.ENDIAN_LSB:
+                lower_val, = emu.readMemoryFormat(addr, fmt)
+                upper_val, = emu.readMemoryFormat(addr, fmt+8)
+            else:
+                lower_val, = emu.readMemoryFormat(addr, fmt+8)
+                upper_val, = emu.readMemoryFormat(addr, fmt)
+            ret = upper_val << 64 | lower_val
+        return ret
+
+    def getOperAddr(self, op, emu=None):
+        if emu is None:
+            return None
+
+        return (self._get_base_reg(emu) + self._get_offset(emu)) & e_bits.u_maxes[emu.psize]
+
+    def updateReg(self, op, emu, addr=None):
+        if addr is None:
+            addr = self.getOperAddr(op, emu)
+        emu.setRegister(self.base_reg, addr)
+
+    def updateRegObj(self, emu):
+        import vivisect.symboliks.common as vs_common
+        rval = emu.getRegObj(self.base_reg) + vs_common.Const(self._get_offset(emu), emu.psize)
+        emu.setRegObj(self.base_reg, rval)
+
+    def render(self, mcanv, op, idx):
+        mcanv.addNameText(hex(self._get_offset()))
+        mcanv.addText('(')
+        if self.base_reg == 0:
+            mcanv.addNameText('0x0')
+        else:
+            mcanv.addNameText(ppc_regs[self.base_reg][0], typename='registers')
+        mcanv.addText(')')
+
+    def repr(self, op):
+        base = ppc_regs[self.base_reg][0]
+        return f'{hex(self._get_offset())}({base})'
+
+    def getWidth(self, emu):
+        return self.tsize
+
+
+class RiscVMemSPOper(RiscVMemOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        # The SP memory operands always use the X2 (SP) register as the base reg
+        self.base_reg = REG_SP
+        self.offset = sum((ival & a.mask) >> a.shift for a in args)
+        self.va = va
+        self.oflags = oflags
+        self._set_tsize()
+
+
+class RiscVImmOper(envi.ImmedOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        # RiscV immediate values can be split up in many weird ways, so the args
+        # are a list of RiscVFieldArgs values
+        self.val = sum((ival & a.mask) >> a.shift for a in args)
+        self.va = va
+        self.oflags = oflags
 
     def __eq__(self, oper):
         if not isinstance(oper, self.__class__):
@@ -172,7 +320,11 @@ class RiscVImmOper(envi.ImmedOper):
         pass
 
 
-class RiscVCRegOper(RiscVRegOper):
-    def __init__(self, c_reg, va=0, oflags=0):
-        reg = c_reg + 8
-        super().__init__(reg, va, oflags)
+class RiscVRMOper(RiscVImmOper):
+    def __init__(self, args, ival, va=0, oflags=0):
+        self.va = va
+        self.val = (ival & args.mask) >> args.shift
+        self.oflags = oflags
+
+    def repr(self, op):
+        return RM_NAMES.get(self.val, 'inv')

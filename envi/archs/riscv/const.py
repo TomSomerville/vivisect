@@ -110,3 +110,39 @@ class RISCV_CAT(enum.IntFlag):
 
     def __contains__(self, item):
         return self.value & int(item) == self.value
+
+
+# A mapping of rounding modes to strings for printing
+RM_NAMES = {
+    0b000: 'rne',
+    0b001: 'rtz',
+    0b010: 'rdn',
+    0b011: 'rup',
+    0b100: 'rmm',
+    0b111: 'dyn',
+}
+
+# A mapping of CSR register values to the corresponding meta register
+CSR_REGISTER_METAS = {
+    0x001: None,
+    0x002: None,
+    0x003: None,
+    0xC00: None,
+    0xC01: None,
+    0xC02: None,
+    0xC80: None,
+    0xC81: None,
+    0xC82: None,
+}
+
+CSR_REGISTER_NAMES = {
+    0x001: 'fflags',
+    0x002: 'frm',
+    0x003: 'fcsr',
+    0xC00: 'cycle',
+    0xC01: 'time',
+    0xC02: 'instret',
+    0xC80: 'cycleh',
+    0xC81: 'timeh',
+    0xC82: 'instreth',
+}
