@@ -402,19 +402,19 @@ RiscVField = namedtuple('RiscVField', ['name', 'type', 'args', 'flags'])
 #
 # This field type contains a list of mask and shift operations that can be used
 # to re-assemble the correct immediate from the instruction value
-RiscVImmField = namedtuple('RiscVImmField', ['name', 'type', 'imm_args', 'flags'])
+RiscVImmField = namedtuple('RiscVImmField', ['name', 'type', 'args', 'flags'])
 
 # RiscV load/store instructions use an immediate value to define an offset from
 # a source/base register This field contains the arguments necessary to extract
 # the source register value and immediate offset value from the instruction
 # value
 #   LWU  imm[11:0] | rs1 | rd
-RiscVMemField = namedtuple('RiscVMemField', ['name', 'type', 'rs1_args', 'imm_args', 'flags'])
+RiscVMemField = namedtuple('RiscVMemField', ['name', 'type', 'args', 'flags'])
 
 # RiscV compressed load/store instructions are like normal load/store
 # instructions but they always use the x2 (the stack pointer) register as the
 # base register
-RiscVMemSPField = namedtuple('RiscVMemSPField', ['name', 'type', 'imm_args', 'flags'])
+RiscVMemSPField = namedtuple('RiscVMemSPField', ['name', 'type', 'args', 'flags'])
 
 # A field type to hold mask/shift arguments for IMM and MEM fields
 RiscVFieldArgs = namedtuple('RiscVFieldArgs', ['mask', 'shift'])

@@ -65,14 +65,14 @@ class RiscVDisasm:
         else:
             raise envi.InvalidInstruction(bytez[offset:offset+opcode_bytes], 'No Instruction Matched: %x' % ival, va)
 
-        opers = tuple(OPERCLASSES[f.type](ival=ival, args=f.args va=va, oflags=f.flags) for f in found.fields)
+        opers = tuple(OPERCLASSES[f.type](ival=ival, args=f.args, va=va, oflags=f.flags) for f in found.fields)
         return RiscVOpcode(va, found.opcode, found.name, opcode_bytes, opers, found.flags)
 
 
 OPERCLASSES = {
     RISCV_FIELD.REG: RiscVRegOper,
     RISCV_FIELD.C_REG: RiscVCRegOper,
-    RISCV_FIELD.CSR_REG = RiscVCSRRegOper,
+    RISCV_FIELD.CSR_REG: RiscVCSRRegOper,
     RISCV_FIELD.MEM: RiscVMemOper,
     RISCV_FIELD.MEM_SP: RiscVMemSPOper,
     RISCV_FIELD.IMM: RiscVImmOper,

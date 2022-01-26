@@ -912,7 +912,7 @@ FIELD_TYPE_MAP = {
 }
 
 
-def make_field_str(instr_name, op, *extra_args, field_type=None, field_name=None):
+def make_field_str(instr_name, op, args=None, field_type=None, field_name=None):
     if field_type is None:
         field_type = op.type
     named_type = FIELD_TYPE_MAP[field_type]
@@ -929,7 +929,7 @@ def make_field_str(instr_name, op, *extra_args, field_type=None, field_name=None
     else:
         flags_str = '0'
 
-    if not extra_args:
+    if not args:
         # Turn the old shift/mask operands into the newer mask/shift tuple
         args_str = make_field_args_str(op.mask << op.shift, op.shift)
     else:
@@ -937,19 +937,20 @@ def make_field_str(instr_name, op, *extra_args, field_type=None, field_name=None
         # has an argument list for the base register and a second argument list
         # for the offset immediate value.
         field_args = []
-        for args in extra_args:
+        for arglist in args:
             # If this argument a tuple of two integers, just make the field,
             # otherwise make a list of fields.
-            if len(args) >= 2 and isinstance(args[0], int) and isinstance(args[1], int):
-                field_args.append(make_field_args_str(*args))
+            if len(arglist) >= 2 and isinstance(arglist[0], int) and isinstance(arglist[1], int):
+                field_args.append(make_field_args_str(*arglist))
             else:
-                # Each individual set of args should be wrapped in parenthesis
-                field_args.append('(' + ', '.join(make_field_args_str(*a) for a in args) + ',)')
+                # Each individual set of arglist should be wrapped in
+                # parenthesis
+                field_args.append('(' + ', '.join(make_field_args_str(*a) for a in arglist) + ',)')
         # Don't wrap the field args in parenthesis, more args list means more
         # required positional args to this field
         args_str = ', '.join(field_args)
 
-    operand_str = "%s('%s', RISCV_FIELD.%s, %s, %s)" % \
+    operand_str = "%s('%s', RISCV_FIELD.%s, (%s), %s)" % \
             (named_type, field_name, field_type.name, args_str, flags_str)
 
     return operand_str
@@ -1073,19 +1074,19 @@ RiscVField = namedtuple('RiscVField', ['name', 'type', 'args', 'flags'])
 #
 # This field type contains a list of mask and shift operations that can be used
 # to re-assemble the correct immediate from the instruction value
-RiscVImmField = namedtuple('RiscVImmField', ['name', 'type', 'imm_args', 'flags'])
+RiscVImmField = namedtuple('RiscVImmField', ['name', 'type', 'args', 'flags'])
 
 # RiscV load/store instructions use an immediate value to define an offset from
 # a source/base register This field contains the arguments necessary to extract
 # the source register value and immediate offset value from the instruction
 # value
 #   LWU  imm[11:0] | rs1 | rd
-RiscVMemField = namedtuple('RiscVMemField', ['name', 'type', 'rs1_args', 'imm_args', 'flags'])
+RiscVMemField = namedtuple('RiscVMemField', ['name', 'type', 'args', 'flags'])
 
 # RiscV compressed load/store instructions are like normal load/store
 # instructions but they always use the x2 (the stack pointer) register as the
 # base register
-RiscVMemSPField = namedtuple('RiscVMemSPField', ['name', 'type', 'imm_args', 'flags'])
+RiscVMemSPField = namedtuple('RiscVMemSPField', ['name', 'type', 'args', 'flags'])
 
 # A field type to hold mask/shift arguments for IMM and MEM fields
 RiscVFieldArgs = namedtuple('RiscVFieldArgs', ['mask', 'shift'])
@@ -1138,13 +1139,13 @@ __all__ = ['instructions']
                         assert len(rs1_op) == 1
                         rs1_args = (rs1_op[0].shift, rs1_op[0].mask)
                         last_field = make_field_str(name, imm_fields[0][1],
-                                rs1_args, imm_args, field_type=OpcodeType.MEM)
+                                args=(rs1_args, imm_args), field_type=OpcodeType.MEM)
                     else:
                         # This should only be true for "compressed" load
                         # instructions
                         assert name.startswith('C.')
                         last_field = make_field_str(name, imm_fields[0][1],
-                                imm_args, field_type=OpcodeType.MEM_SP)
+                                args=imm_args, field_type=OpcodeType.MEM_SP)
 
                 elif imm_fields:
                     # Build a list of only the non-imm fields to be turned into
@@ -1156,7 +1157,7 @@ __all__ = ['instructions']
                     # identify what this one should be called.
                     imm_field_name = imm_fields[0][1].value.split('[', 1)[0]
 
-                    last_field = make_field_str(name, imm_fields[0][1], imm_args,
+                    last_field = make_field_str(name, imm_fields[0][1], args=imm_args,
                             field_type=OpcodeType.IMM, field_name=imm_field_name)
 
                 elif any(op.type == OpcodeType.RM for op in instr.fields):
@@ -1185,7 +1186,7 @@ __all__ = ['instructions']
                         # Convert the normal shift/mask values into IMM
                         # mask/shift values
                         imm_args = ((op.mask << op.shift, op.shift),)
-                        operand_list.append(make_field_str(name, op, imm_args))
+                        operand_list.append(make_field_str(name, op, args=imm_args))
                     else:
                         print('%s missing %r field' % (name, op))
 
