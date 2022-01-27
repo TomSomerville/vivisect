@@ -71,7 +71,7 @@ class RiscVOpcode(envi.Opcode):
 
 
 class RiscVRegOper(envi.RegisterOper):
-    def __init__(self, args, ival, va=0, oflags=0):
+    def __init__(self, ival, args, va=0, oflags=0):
         self.va = va
         self.reg = (ival & args.mask) >> args.shift
         self.oflags = oflags
@@ -118,15 +118,15 @@ class RiscVRegOper(envi.RegisterOper):
 
 
 class RiscVCRegOper(RiscVRegOper):
-    def __init__(self, args, ival, va=0, oflags=0):
-        super().__init__(reg, args, ival, oflags)
+    def __init__(self, ival, args, va=0, oflags=0):
+        super().__init__(ival, args, oflags)
         # To convert the compressed register values to real registers add 8
         self.reg += 8
 
 
 class RiscVCSRRegOper(RiscVRegOper):
-    def __init__(self, args, ival, va=0, oflags=0):
-        super().__init__(reg, args, ival, oflags)
+    def __init__(self, ival, args, va=0, oflags=0):
+        super().__init__(ival, args, va, oflags)
         # The register number in the instruction is a CSR meta regsiter
         self.csr_reg = self.reg
         # Get the real Meta register value
@@ -137,7 +137,7 @@ class RiscVCSRRegOper(RiscVRegOper):
 
 
 class RiscVMemOper(envi.DerefOper):
-    def __init__(self, args, ival, va=0, oflags=0):
+    def __init__(self, ival, args, va=0, oflags=0):
         # The args for MemOper is a tuple of: base register args and a list of
         # imm args
         base_reg_args, imm_args = args
@@ -253,7 +253,7 @@ class RiscVMemOper(envi.DerefOper):
 
 
 class RiscVMemSPOper(RiscVMemOper):
-    def __init__(self, args, ival, va=0, oflags=0):
+    def __init__(self, ival, args, va=0, oflags=0):
         # The SP memory operands always use the X2 (SP) register as the base reg
         self.base_reg = REG_SP
         self.offset = sum((ival & a.mask) >> a.shift for a in args)
@@ -263,7 +263,7 @@ class RiscVMemSPOper(RiscVMemOper):
 
 
 class RiscVImmOper(envi.ImmedOper):
-    def __init__(self, args, ival, va=0, oflags=0):
+    def __init__(self, ival, args, va=0, oflags=0):
         # RiscV immediate values can be split up in many weird ways, so the args
         # are a list of RiscVFieldArgs values
         self.val = sum((ival & a.mask) >> a.shift for a in args)
@@ -321,7 +321,7 @@ class RiscVImmOper(envi.ImmedOper):
 
 
 class RiscVRMOper(RiscVImmOper):
-    def __init__(self, args, ival, va=0, oflags=0):
+    def __init__(self, ival, args, va=0, oflags=0):
         self.va = va
         self.val = (ival & args.mask) >> args.shift
         self.oflags = oflags

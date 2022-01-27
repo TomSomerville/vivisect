@@ -21,7 +21,7 @@ def parseBytes(value, size=4):
 
 
 def start(_archname=None, _verbose=0):
-    global vw,emu
+    global vw, emu
     vw = vivisect.VivWorkspace()
 
     if vw is None:
