@@ -102,3 +102,6 @@ class RiscVRegisterContext(e_reg.RegisterContext):
         self.loadRegDef(registers_info)
         self.loadRegMetas([], statmetas=status_meta)
         self.setRegisterIndexes(REG_PC, REG_X2)
+
+# Create a register context that will be used for lookups
+riscv_regs = RiscVRegisterContext()

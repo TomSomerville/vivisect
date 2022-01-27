@@ -1,8 +1,28 @@
 import envi
-import envi.archs.riscv.regs as riscv_regs
+from envi.archs.riscv.regs import riscv_regs, REG_PC
+from envi.archs.riscv.const import RISCV_OF
+
+
+__all__ = [
+    'RiscVOpcode',
+    'RiscVRegOper',
+    'RiscVCRegOper',
+    'RiscVCSRRegOper',
+    'RiscVMemOper',
+    'RiscVMemSPOper',
+    'RiscVImmOper',
+    'RiscVRMOper',
+]
 
 
 IF_CALLCC = (envi.IF_CALL | envi.IF_COND)
+
+
+def _operand_shift(value, shift):
+    try:
+        return value >> shift
+    except ValueError:
+        return value << abs(shift)
 
 
 class RiscVOpcode(envi.Opcode):
@@ -50,6 +70,12 @@ class RiscVOpcode(envi.Opcode):
 
         return ret
 
+    def __repr__(self):
+        """
+        Over-riding the standard envi.Opcode.__repr__ to speed it up
+        """
+        return self.mnem + " " + ",".join(o.repr(self) for o in self.opers)
+
     def render(self):
         if self.prefixes:
             pfx = self._getPrefixName(self.prefixes)
@@ -73,7 +99,7 @@ class RiscVOpcode(envi.Opcode):
 class RiscVRegOper(envi.RegisterOper):
     def __init__(self, ival, args, va=0, oflags=0):
         self.va = va
-        self.reg = (ival & args.mask) >> args.shift
+        self.reg = _operand_shift(ival & args.mask, args.shift)
         self.oflags = oflags
 
     def __eq__(self, oper):
@@ -109,7 +135,7 @@ class RiscVRegOper(envi.RegisterOper):
 
     #returns content intended to be printed to screen
     def repr(self, op):
-        return riscv_regs.registers[self.reg]
+        return riscv_regs.getRegisterName(self.reg)
 
     #displays the values on the vivisect canvas gui
     def render(self, mcanv, op, idx):
@@ -141,8 +167,8 @@ class RiscVMemOper(envi.DerefOper):
         # The args for MemOper is a tuple of: base register args and a list of
         # imm args
         base_reg_args, imm_args = args
-        self.base_reg = (ival & base_reg_args.mask) >> base_reg_args.shift
-        self.offset = sum((ival & a.mask) >> a.shift for a in imm_args)
+        self.base_reg = _operand_shift(ival & base_reg_args.mask, base_reg_args.shift)
+        self.offset = sum(_operand_shift(ival & a.mask, a.shift) for a in imm_args)
         self.va = va
         self.oflags = oflags
         self._set_tsize()
@@ -241,11 +267,12 @@ class RiscVMemOper(envi.DerefOper):
         if self.base_reg == 0:
             mcanv.addNameText('0x0')
         else:
-            mcanv.addNameText(ppc_regs[self.base_reg][0], typename='registers')
+            base = riscv_regs.getRegisterName(self.base_reg)
+            mcanv.addNameText(base, typename='registers')
         mcanv.addText(')')
 
     def repr(self, op):
-        base = ppc_regs[self.base_reg][0]
+        base = riscv_regs.getRegisterName(self.base_reg)
         return f'{hex(self._get_offset())}({base})'
 
     def getWidth(self, emu):
@@ -256,7 +283,7 @@ class RiscVMemSPOper(RiscVMemOper):
     def __init__(self, ival, args, va=0, oflags=0):
         # The SP memory operands always use the X2 (SP) register as the base reg
         self.base_reg = REG_SP
-        self.offset = sum((ival & a.mask) >> a.shift for a in args)
+        self.offset = sum(_operand_shift(ival & a.mask, a.shift) for a in args)
         self.va = va
         self.oflags = oflags
         self._set_tsize()
@@ -266,7 +293,7 @@ class RiscVImmOper(envi.ImmedOper):
     def __init__(self, ival, args, va=0, oflags=0):
         # RiscV immediate values can be split up in many weird ways, so the args
         # are a list of RiscVFieldArgs values
-        self.val = sum((ival & a.mask) >> a.shift for a in args)
+        self.val = sum(_operand_shift(ival & a.mask, a.shift) for a in args)
         self.va = va
         self.oflags = oflags
 
@@ -323,7 +350,7 @@ class RiscVImmOper(envi.ImmedOper):
 class RiscVRMOper(RiscVImmOper):
     def __init__(self, ival, args, va=0, oflags=0):
         self.va = va
-        self.val = (ival & args.mask) >> args.shift
+        self.val = _operand_shift(ival & args.mask, args.shift)
         self.oflags = oflags
 
     def repr(self, op):

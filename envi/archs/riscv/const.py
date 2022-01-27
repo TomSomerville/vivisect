@@ -6,6 +6,9 @@ from envi.archs.riscv.const_gen import *
 __all__ = [
     # Defined in this file
     'RISCV_CAT',
+    'RM_NAMES',
+    'CSR_REGISTER_METAS',
+    'CSR_REGISTER_NAMES',
 
     # Defined in const_gen
     'RISCV_FORM',
