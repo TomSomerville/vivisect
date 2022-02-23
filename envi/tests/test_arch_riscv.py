@@ -5,9 +5,10 @@ import envi.archs.riscv.emu as eape
 import envi.archs.riscv.const as eapc
 import envi.const as e_const
 import envi.common as e_common
+import envi
 import envi.tests.riscv_test_instructions as inst
-# from envi.archs.riscv.regs import *
-# from envi.archs.riscv.const import *
+from envi.archs.riscv.regs import *
+from envi.archs.riscv.const import *
 
 import logging
 
@@ -43,19 +44,24 @@ class RiscVUnitTests(unittest.TestCase):
         test_pass = 0
 
         vw, emu = getVivEnv()
-
         for test_bytes, result_instr in inst.instructions.items():
             try:
-                # test decoding of the instructions
                 op = vw.arch.archParseOpcode(bytes.fromhex(test_bytes), 0, va=0x40004560)
                 op_str = repr(op).strip()
-                if op_str == result_instr:
-                    test_pass += 1
-                if result_instr != op_str:
-                    logging.error('{}: ours: {} != {}'.format(test_bytes, repr(op_str), repr(result_instr)))
-
+            except envi.InvalidInstruction:
+                op_str = None
             except Exception as  e:
                 logging.exception('ERROR: {}: {}'.format(test_bytes, result_instr))
+                break
+            if op_str == result_instr:
+                test_pass += 1
+                print(test_bytes, op_str, 'op size ({}) test size ({})'.format(op.size, len(test_bytes)), "Passed")
+            else:
+                logging.error('{}: ours: {} size({}) != {} size({})'.format(test_bytes, repr(op_str), op.size, repr(result_instr), len(test_bytes)))
+            if op.size != len(test_bytes):
+                print(op_str, "Size Mismatch")
+
+
 
         logger.info("%d of %d successes", test_pass, len(inst.instructions))
         self.assertEqual(test_pass, len(inst.instructions))

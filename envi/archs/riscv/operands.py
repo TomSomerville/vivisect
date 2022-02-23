@@ -1,6 +1,6 @@
 import envi
-from envi.archs.riscv.regs import riscv_regs, REG_PC
-from envi.archs.riscv.const import RISCV_OF
+from envi.archs.riscv.regs import riscv_regs, REG_PC, REG_SP
+from envi.archs.riscv.const import RISCV_OF, RM_NAMES, CSR_REGISTER_METAS, CSR_REGISTER_NAMES
 
 
 __all__ = [
@@ -186,7 +186,7 @@ class RiscVMemOper(envi.DerefOper):
         elif self.oflags & RISCV_OF.QUADWORD:
             self.tsize = 16
         else:
-            raise envi.InvalidInstruction(mesg='Invalid instruction flags for memory access: 0x%x' % oflags)
+            raise envi.InvalidInstruction(mesg='Invalid instruction flags for memory access: 0x%x' % self.oflags)
 
     def __eq__(self, oper):
         return isinstance(oper, self.__class__) \

@@ -19,19 +19,29 @@ class RiscVDisasm:
     def setCategories(self):
         # True = 32 bit
         # False = 16 bit
-        self.instrs = {True: {}, False: {}}
+        temp_instrs = {True: {}, False: {}}
         xlen = self.psize * 8
         for entry in instructions:
             instr_size = entry.cat[0].cat != RISCV_CAT.C
-            if entry.mask not in self.instrs[instr_size]:
-                self.instrs[instr_size][entry.mask] = {}
+            if entry.mask not in temp_instrs[instr_size]:
+                temp_instrs[instr_size][entry.mask] = {}
             if any(cat.xlen == xlen for cat in entry.cat):
-                if entry.value in self.instrs[instr_size][entry.mask]:
+                if entry.value in temp_instrs[instr_size][entry.mask]:
                     assert False
 
-                self.instrs[instr_size][entry.mask][entry.value] = entry
+                temp_instrs[instr_size][entry.mask][entry.value] = entry
 
+        def count_bits(value):
+            return sum(int(v) for v in format(value, 'b'))
 
+        self.instrs = {True: {} , False: {}}
+
+        for instr_size in temp_instrs:
+            masks_with_bit_count = [(count_bits(mask), mask) for mask in temp_instrs[instr_size]]
+            sorted_masks = [mask for _, mask in reversed((sorted(masks_with_bit_count)))]
+
+            for mask in sorted_masks:
+                self.instrs[instr_size][mask] = temp_instrs[instr_size][mask]
 
     def setEndian(self, endian):
         self.endian = endian
